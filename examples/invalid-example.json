@@ -1,0 +1,16 @@
+{
+  "title": "Every common mistake in one file",
+  "kind": "contract",
+  "data": {
+    "endpoints": [
+      { "method": "FETCH", "path": "/api/things", "response": { "status": 200, "body": [] } },
+      { "method": "GET", "path": "/_hub/stats", "response": { "status": 200 } },
+      { "method": "GET", "path": "/api/search?q=abc", "response": { "status": 200 } },
+      { "method": "GET", "path": "/api/items", "response": { "status": 700, "headers": { "X-Total-Count": 2 } } },
+      { "method": "GET", "path": "/api/slow", "response": { "status": 200, "delayMs": 90000 } },
+      { "method": "GET", "path": "/api/users/:id" },
+      { "method": "GET", "path": "/api/accounts/:id", "response": { "status": 200 } },
+      { "method": "GET", "path": "/api/Accounts/:accountId", "response": { "status": 200 } }
+    ]
+  }
+}

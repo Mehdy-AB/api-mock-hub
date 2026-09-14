@@ -1,0 +1,18 @@
+services:
+  api-mock-hub:
+    build: .
+    image: api-mock-hub:latest
+    restart: unless-stopped
+    ports:
+      - "${HUB_PORT:-3000}:3000"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      PORT: 3000
+      DATA_DIR: /app/data
+    volumes:
+      - hub-data:/app/data
+
+volumes:
+  hub-data:

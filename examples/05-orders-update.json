@@ -1,0 +1,39 @@
+{
+  "title": "Order detail includes line items",
+  "message": "Frontend needs items on the order page. Import after 02-orders-crud.json: one route is updated, one is unchanged.",
+  "kind": "request",
+  "data": {
+    "endpoints": [
+      {
+        "method": "GET",
+        "path": "/api/orders/:id",
+        "summary": "Get one order",
+        "tags": ["orders"],
+        "request": { "params": [{ "name": "id", "example": 101, "description": "Order id" }] },
+        "response": {
+          "status": 200,
+          "body": {
+            "id": 101,
+            "customer": "Sara Haddad",
+            "total": 49.9,
+            "currency": "EUR",
+            "status": "paid",
+            "createdAt": "2026-09-01T10:00:00Z",
+            "shippedAt": null,
+            "items": [
+              { "sku": "BOOK-1", "title": "Clean Code", "qty": 1, "price": 29.9 },
+              { "sku": "MUG-2", "title": "Coffee mug", "qty": 1, "price": 20 }
+            ]
+          }
+        }
+      },
+      {
+        "method": "DELETE",
+        "path": "/api/orders/:id",
+        "summary": "Cancel an order",
+        "tags": ["orders"],
+        "response": { "status": 204 }
+      }
+    ]
+  }
+}

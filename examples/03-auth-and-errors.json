@@ -1,0 +1,61 @@
+{
+  "title": "Auth flows and error responses",
+  "message": "login-invalid exists only so the frontend can build the error state.",
+  "kind": "publish",
+  "data": [
+    {
+      "method": "POST",
+      "path": "/api/auth/login",
+      "summary": "Log in",
+      "tags": ["auth"],
+      "request": { "bodyExample": { "email": "sara@example.com", "password": "secret" } },
+      "response": {
+        "status": 200,
+        "delayMs": 400,
+        "body": { "accessToken": "mock-access-token", "refreshToken": "mock-refresh-token", "expiresIn": 3600 }
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/login-invalid",
+      "summary": "Log in with wrong password (test route)",
+      "tags": ["auth"],
+      "response": { "status": 401, "body": { "error": "invalid_credentials", "message": "Email or password is wrong" } }
+    },
+    {
+      "method": "POST",
+      "path": "/api/users",
+      "summary": "Register with invalid data (422 example)",
+      "tags": ["users"],
+      "request": { "bodyExample": { "email": "not-an-email", "password": "123" } },
+      "response": {
+        "status": 422,
+        "body": {
+          "error": "validation_failed",
+          "fields": [
+            { "field": "email", "message": "must be a valid email" },
+            { "field": "password", "message": "must be at least 8 characters" }
+          ]
+        }
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/health",
+      "summary": "Health check (plain text)",
+      "tags": ["system"],
+      "response": { "status": 200, "headers": { "Content-Type": "text/plain" }, "body": "OK" }
+    },
+    {
+      "method": "GET",
+      "path": "/api/files/*filePath",
+      "summary": "Download any file path (wildcard)",
+      "tags": ["files"],
+      "request": { "params": [{ "name": "filePath", "example": "reports/2026/q3.pdf" }] },
+      "response": {
+        "status": 200,
+        "body": { "name": "q3.pdf", "size": 48213, "url": "https://cdn.example.com/reports/2026/q3.pdf" }
+      }
+    }
+  ]
+}

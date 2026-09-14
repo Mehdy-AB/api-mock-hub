@@ -1,0 +1,81 @@
+{
+  "title": "Import pet store from OpenAPI",
+  "message": "Paths get the /v1 prefix from the server URL.",
+  "data": {
+    "openapi": "3.0.3",
+    "info": { "title": "Pet store", "version": "1.0.0" },
+    "servers": [{ "url": "https://api.example.com/v1" }],
+    "paths": {
+      "/pets": {
+        "get": {
+          "tags": ["pets"],
+          "summary": "List pets",
+          "parameters": [{ "name": "limit", "in": "query", "schema": { "type": "integer", "example": 10 } }],
+          "responses": {
+            "200": {
+              "description": "A list of pets",
+              "content": {
+                "application/json": {
+                  "schema": { "type": "array", "items": { "$ref": "#/components/schemas/Pet" } }
+                }
+              }
+            }
+          }
+        },
+        "post": {
+          "tags": ["pets"],
+          "summary": "Add a pet",
+          "requestBody": {
+            "content": { "application/json": { "example": { "name": "Luna", "species": "cat" } } }
+          },
+          "responses": {
+            "201": {
+              "description": "Created",
+              "content": { "application/json": { "example": { "id": 3, "name": "Luna", "species": "cat" } } }
+            },
+            "400": { "description": "Invalid input" }
+          }
+        }
+      },
+      "/pets/{petId}": {
+        "parameters": [{ "name": "petId", "in": "path", "required": true, "schema": { "type": "integer", "example": 1 } }],
+        "get": {
+          "tags": ["pets"],
+          "summary": "Get a pet",
+          "responses": {
+            "200": {
+              "description": "The pet",
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "dog": { "value": { "id": 1, "name": "Rex", "species": "dog", "vaccinated": true } },
+                    "cat": { "value": { "id": 2, "name": "Mimi", "species": "cat", "vaccinated": false } }
+                  }
+                }
+              }
+            },
+            "404": { "description": "Not found" }
+          }
+        },
+        "delete": {
+          "tags": ["pets"],
+          "summary": "Delete a pet",
+          "responses": { "204": { "description": "Deleted" } }
+        }
+      }
+    },
+    "components": {
+      "schemas": {
+        "Pet": {
+          "type": "object",
+          "properties": {
+            "id": { "type": "integer", "example": 1 },
+            "name": { "type": "string", "example": "Rex" },
+            "species": { "type": "string", "enum": ["dog", "cat"] },
+            "birthDate": { "type": "string", "format": "date" }
+          }
+        }
+      }
+    }
+  }
+}

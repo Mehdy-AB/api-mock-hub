@@ -1,0 +1,11 @@
+{
+  "title": "Profile endpoint",
+  "data": {
+    "method": "GET",
+    "path": "/api/profile",
+    "response": {
+      "status": 200,
+      "body": { "id": 7, "name": "Sara Haddad", "email": "sara@example.com", "avatarUrl": null }
+    }
+  }
+}

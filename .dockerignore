@@ -1,0 +1,9 @@
+**/node_modules
+dist
+client/dist
+data
+test
+coverage
+.env
+*.log
+*.tsbuildinfo

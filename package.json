@@ -1,0 +1,68 @@
+{
+  "name": "api-mock-hub",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Shared, reviewed mock API so frontend and backend teams can work in parallel",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Mehdy-AB/api-mock-hub.git"
+  },
+  "homepage": "https://github.com/Mehdy-AB/api-mock-hub#readme",
+  "bugs": "https://github.com/Mehdy-AB/api-mock-hub/issues",
+  "scripts": {
+    "build": "nest build",
+    "build:ui": "npm --prefix client run build",
+    "build:all": "npm run build:ui && npm run build",
+    "install:ui": "npm --prefix client ci",
+    "start": "node dist/main.js",
+    "start:dev": "nest start --watch",
+    "dev:ui": "npm --prefix client run dev",
+    "reset-password": "node dist/cli/reset-password.js",
+    "validate-import": "node dist/cli/validate-import.js",
+    "test": "jest --runInBand",
+    "test:watch": "jest --watch"
+  },
+  "jest": {
+    "rootDir": ".",
+    "testEnvironment": "node",
+    "testRegex": "test/.*\\.(spec|e2e-spec)\\.ts$",
+    "moduleFileExtensions": [
+      "ts",
+      "js",
+      "json"
+    ],
+    "transform": {
+      "^.+\\.ts$": "ts-jest"
+    }
+  },
+  "dependencies": {
+    "@nestjs/common": "^11.2.3",
+    "@nestjs/core": "^11.2.3",
+    "@nestjs/platform-express": "^11.2.3",
+    "@nestjs/swagger": "^11.4.7",
+    "bcryptjs": "^3.0.3",
+    "class-transformer": "^0.5.1",
+    "class-validator": "^0.15.1",
+    "jsonwebtoken": "^9.0.3",
+    "path-to-regexp": "^8.4.2",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2",
+    "swagger-ui-express": "^5.0.1"
+  },
+  "devDependencies": {
+    "@nestjs/cli": "^11.0.24",
+    "@nestjs/testing": "^11.2.3",
+    "@types/express": "^5.0.6",
+    "@types/jest": "^29.5.14",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/node": "^22.20.2",
+    "@types/supertest": "^7.2.1",
+    "@types/swagger-ui-express": "^4.1.8",
+    "jest": "^29.7.0",
+    "supertest": "^7.2.2",
+    "ts-jest": "^29.4.12",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  }
+}

@@ -1,0 +1,45 @@
+{
+  "title": "Starter endpoints",
+  "message": "Example data to try the import flow",
+  "data": {
+    "endpoints": [
+      {
+        "method": "POST",
+        "path": "/auth/login",
+        "tags": ["auth"],
+        "summary": "Log in",
+        "request": { "bodyExample": { "email": "sara@example.com", "password": "secret" } },
+        "response": { "status": 200, "body": { "token": "eyJhbGciOi...", "expiresIn": 3600 }, "delayMs": 300 }
+      },
+      {
+        "method": "GET",
+        "path": "/users",
+        "tags": ["users"],
+        "summary": "List users",
+        "request": { "query": [{ "name": "page", "example": 1 }] },
+        "response": {
+          "status": 200,
+          "headers": { "X-Total-Count": "2" },
+          "body": [
+            { "id": 1, "name": "Sara", "role": "admin" },
+            { "id": 2, "name": "Omar", "role": "user" }
+          ]
+        }
+      },
+      {
+        "method": "GET",
+        "path": "/users/:id",
+        "tags": ["users"],
+        "summary": "Get one user",
+        "request": { "params": [{ "name": "id", "example": 1 }] },
+        "response": { "status": 200, "body": { "id": 1, "name": "Sara", "role": "admin" } }
+      },
+      {
+        "method": "DELETE",
+        "path": "/users/:id",
+        "tags": ["users"],
+        "response": { "status": 204 }
+      }
+    ]
+  }
+}

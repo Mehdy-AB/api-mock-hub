@@ -1,0 +1,94 @@
+{
+  "title": "Orders API contract",
+  "message": "CRUD for the orders screen. GET /api/orders/999 shows the not-found error.",
+  "kind": "publish",
+  "data": {
+    "endpoints": [
+      {
+        "method": "GET",
+        "path": "/api/orders",
+        "summary": "List orders",
+        "tags": ["orders"],
+        "request": {
+          "query": [
+            { "name": "page", "example": 1, "description": "1-based page number" },
+            { "name": "status", "example": "paid", "description": "pending | paid | shipped" }
+          ],
+          "headers": [{ "name": "Authorization", "required": true, "example": "Bearer <token>" }]
+        },
+        "response": {
+          "status": 200,
+          "headers": { "X-Total-Count": "2", "X-Page": "1" },
+          "delayMs": 250,
+          "body": {
+            "items": [
+              { "id": 101, "customer": "Sara Haddad", "total": 49.9, "currency": "EUR", "status": "paid", "createdAt": "2026-09-01T10:00:00Z" },
+              { "id": 102, "customer": "Omar Saleh", "total": 120, "currency": "EUR", "status": "pending", "createdAt": "2026-09-02T08:30:00Z" }
+            ],
+            "page": 1,
+            "pageSize": 20,
+            "total": 2
+          }
+        }
+      },
+      {
+        "method": "GET",
+        "path": "/api/orders/:id",
+        "summary": "Get one order",
+        "tags": ["orders"],
+        "request": { "params": [{ "name": "id", "example": 101, "description": "Order id" }] },
+        "response": {
+          "status": 200,
+          "body": {
+            "id": 101,
+            "customer": "Sara Haddad",
+            "total": 49.9,
+            "currency": "EUR",
+            "status": "paid",
+            "createdAt": "2026-09-01T10:00:00Z",
+            "shippedAt": null
+          }
+        }
+      },
+      {
+        "method": "GET",
+        "path": "/api/orders/999",
+        "summary": "Order not found (example error)",
+        "tags": ["orders"],
+        "response": {
+          "status": 404,
+          "body": { "error": "not_found", "message": "Order 999 does not exist" }
+        }
+      },
+      {
+        "method": "POST",
+        "path": "/api/orders",
+        "summary": "Create an order",
+        "tags": ["orders"],
+        "request": {
+          "bodyExample": { "customer": "Sara Haddad", "items": [{ "sku": "BOOK-1", "qty": 2 }] }
+        },
+        "response": {
+          "status": 201,
+          "headers": { "Location": "/api/orders/103" },
+          "body": { "id": 103, "status": "pending", "total": 39.8, "currency": "EUR" }
+        }
+      },
+      {
+        "method": "PATCH",
+        "path": "/api/orders/:id",
+        "summary": "Change order status",
+        "tags": ["orders"],
+        "request": { "bodyExample": { "status": "shipped" } },
+        "response": { "status": 200, "body": { "id": 101, "status": "shipped", "shippedAt": "2026-09-03T12:00:00Z" } }
+      },
+      {
+        "method": "DELETE",
+        "path": "/api/orders/:id",
+        "summary": "Cancel an order",
+        "tags": ["orders"],
+        "response": { "status": 204 }
+      }
+    ]
+  }
+}
