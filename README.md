@@ -48,16 +48,32 @@ docker run --rm -v api-mock-hub_hub-data:/data -v "$PWD":/backup alpine tar czf 
 
 If the hub is reachable from the internet, put Nginx or Caddy with TLS in front and consider setting `MOCK_API_KEY`.
 
+### Coolify (Railpack or Nixpacks)
+
+Point Coolify at the repository and keep the default build pack. `npm run build` builds both the web UI and the server, and `npm start` runs them.
+
+Set these in Coolify:
+
+| Setting | Value |
+|---|---|
+| Ports exposed | `3000` |
+| Environment variable `ADMIN_PASSWORD` | At least 6 characters. Used only on the first start. |
+| Environment variable `DATA_DIR` | `/data` |
+| Persistent storage | A volume mounted at `/data`, so users, endpoints and history survive redeploys |
+
+You can also pick the Dockerfile build pack, which uses the included `Dockerfile`.
+
 ### Node.js
 
-Requires Node.js 20 or newer.
+Requires Node.js 22 or newer.
 
 ```bash
 npm install
-npm run install:ui
-npm run build:ui                              # the server serves client/dist at /_hub/
-ADMIN_PASSWORD=admin123 npm run start:dev     # http://localhost:3000/_hub/
+npm run build                                 # builds the web UI (client/dist) and the server
+ADMIN_PASSWORD=admin123 npm start             # http://localhost:3000/_hub/
 ```
+
+For development, run `ADMIN_PASSWORD=admin123 npm run start:dev` instead of `npm start`.
 
 Run the tests with `npm test`.
 For hot reload on the UI, keep the server running and start `npm run dev:ui`, then open http://localhost:5173/_hub/.

@@ -11,7 +11,7 @@ COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund
 COPY tsconfig.json tsconfig.build.json nest-cli.json ./
 COPY src ./src
-RUN npm run build && npm prune --omit=dev
+RUN npm run build:server && npm prune --omit=dev
 
 FROM node:22-alpine
 WORKDIR /app

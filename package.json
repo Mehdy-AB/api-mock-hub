@@ -4,6 +4,9 @@
   "private": true,
   "description": "Shared, reviewed mock API so frontend and backend teams can work in parallel",
   "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/Mehdy-AB/api-mock-hub.git"
@@ -11,9 +14,10 @@
   "homepage": "https://github.com/Mehdy-AB/api-mock-hub#readme",
   "bugs": "https://github.com/Mehdy-AB/api-mock-hub/issues",
   "scripts": {
-    "build": "nest build",
-    "build:ui": "npm --prefix client run build",
-    "build:all": "npm run build:ui && npm run build",
+    "build": "npm run build:ui && npm run build:server",
+    "build:server": "nest build",
+    "build:ui": "node scripts/build-ui.mjs",
+    "build:all": "npm run build",
     "install:ui": "npm --prefix client ci",
     "start": "node dist/main.js",
     "start:dev": "nest start --watch",

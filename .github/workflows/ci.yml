@@ -28,11 +28,8 @@ jobs:
       - name: Test server
         run: npm test
 
-      - name: Build server
+      - name: Build web UI and server
         run: npm run build
-
-      - name: Build web UI
-        run: npm run build:ui
 
       - name: Validate example import files
         run: npm run validate-import -- examples/01-single-endpoint.json examples/02-orders-crud.json examples/03-auth-and-errors.json examples/04-openapi-petstore.json examples/05-orders-update.json examples/sample-import.json
