@@ -2,9 +2,9 @@ import { ChangeEvent, FormEvent, useMemo, useState } from 'react';
 import { api } from '../api';
 import { useUser } from '../auth';
 import { StatusBadge } from '../components/Badges';
-import { hubStore } from '../data';
 import { ErrorBox, Field } from '../components/Common';
-import { href } from '../router';
+import { hubStore } from '../data';
+import { navigate } from '../router';
 import type { ImportResult, ProposalKind } from '../types';
 import { isObject, parseJsonText, plural } from '../util';
 
@@ -42,7 +42,8 @@ function detect(value: unknown): Detected | null {
   return { data, format: 'hub', count: 0, wrapper };
 }
 
-export function ImportPage() {
+/** The import form, shown in a popup over the API page. */
+export function ImportForm({ onClose }: { onClose: () => void }) {
   const user = useUser();
   const [text, setText] = useState('');
   const [format, setFormat] = useState<Format>('auto');
@@ -85,7 +86,7 @@ export function ImportPage() {
         direct,
       );
       setResult(r);
-      hubStore.refresh();
+      await hubStore.refresh();
     } catch (err) {
       setError(err);
     } finally {
@@ -93,31 +94,20 @@ export function ImportPage() {
     }
   };
 
-  return (
-    <div className="stack-lg">
-      <div className="page-head">
-        <div>
-          <h1>Import</h1>
-          <p className="muted">
-            Paste or upload endpoints. The import becomes one proposal: new routes are added, changed routes are updated, identical routes
-            are skipped, nothing is deleted.
-          </p>
-        </div>
-      </div>
-
-      {result && (
-        <div className={`banner ${result.proposal ? 'banner-ok' : 'banner-info'} stack`} style={{ gap: 6 }}>
-          {result.proposal ? (
+  if (result) {
+    const p = result.proposal;
+    return (
+      <div className="stack">
+        <div className={`banner ${p ? 'banner-ok' : 'banner-info'} stack`} style={{ gap: 6 }}>
+          {p ? (
             <div className="row">
               <strong>
-                <a href={href(`/proposals/${result.proposal.id}`)}>
-                  Proposal #{result.proposal.id} {result.proposal.title}
-                </a>
+                Proposal #{p.id} {p.title}
               </strong>
-              <StatusBadge status={result.proposal.status} />
+              <StatusBadge status={p.status} />
             </div>
           ) : (
-            <strong>Everything is already up to date. No proposal was created.</strong>
+            <strong>Everything is already up to date. Nothing was created.</strong>
           )}
           <div className="small">
             {plural(result.summary.added.length, 'added endpoint')}, {plural(result.summary.updated.length, 'updated endpoint')},{' '}
@@ -131,95 +121,120 @@ export function ImportPage() {
             </ul>
           )}
         </div>
-      )}
-      {error != null && <ErrorBox error={error} />}
-
-      <form className="stack-lg" onSubmit={submit}>
-        <section className="card stack">
-          <div className="row">
-            <h2 style={{ margin: 0 }}>Source</h2>
-            <span className="spacer" />
-            <label className="btn btn-sm">
-              Choose JSON file
-              <input type="file" accept=".json,application/json" onChange={onFile} hidden />
-            </label>
-          </div>
-          <textarea
-            className="mono"
-            rows={14}
-            spellCheck={false}
-            aria-label="Import JSON"
-            placeholder={'{ "endpoints": [ { "method": "GET", "path": "/users", "response": { "status": 200, "body": [] } } ] }\n\nor a whole OpenAPI 3 / Swagger 2 document'}
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-          />
-          {!parsed.ok && <span className="error-text">Invalid JSON: {parsed.error}</span>}
-          {detected && (
-            <span className="small muted">
-              Detected {detected.format === 'openapi' ? 'an OpenAPI document' : 'hub endpoints'} with {plural(detected.count, 'endpoint')}.
-            </span>
-          )}
-          <div className="form-row-3">
-            <Field label="Format">
-              <select value={format} onChange={(e) => setFormat(e.target.value as Format)}>
-                <option value="auto">Detect automatically</option>
-                <option value="hub">Hub JSON</option>
-                <option value="openapi">OpenAPI / Swagger</option>
-              </select>
-            </Field>
-          </div>
-          {effectiveFormat === 'openapi' && (
-            <div className="stack" style={{ gap: 6 }}>
-              <label className="checkbox">
-                <input type="checkbox" checked={overrideBase} onChange={(e) => setOverrideBase(e.target.checked)} />
-                Override the path prefix
-              </label>
-              <span className="small muted">
-                By default the path from the document’s server URL or basePath is put in front of every route, for example /api/v1.
-              </span>
-              {overrideBase && (
-                <input
-                  type="text"
-                  className="mono"
-                  placeholder="empty = no prefix"
-                  aria-label="Path prefix"
-                  value={basePath}
-                  onChange={(e) => setBasePath(e.target.value)}
-                />
-              )}
-            </div>
-          )}
-        </section>
-
-        <section className="card stack">
-          <h2 style={{ margin: 0 }}>Proposal</h2>
-          <Field label="Title" hint={detected?.wrapper?.title ? `Default: ${detected.wrapper.title}` : 'Default: Import N endpoint(s)'}>
-            <input type="text" maxLength={200} value={title} onChange={(e) => setTitle(e.target.value)} />
-          </Field>
-          <Field label="Message">
-            <textarea rows={2} value={message} onChange={(e) => setMessage(e.target.value)} />
-          </Field>
-          <Field label="Kind">
-            <select value={kind} onChange={(e) => setKind(e.target.value as '' | ProposalKind)}>
-              <option value="">From my role</option>
-              <option value="publish">Contract</option>
-              <option value="request">Request</option>
-            </select>
-          </Field>
-          {user.role === 'admin' && (
-            <label className="checkbox">
-              <input type="checkbox" checked={direct} onChange={(e) => setDirect(e.target.checked)} />
-              Apply immediately without review (admin)
-            </label>
-          )}
-        </section>
-
         <div className="row">
-          <button type="submit" className="btn btn-primary" disabled={busy || !detected || !parsed.ok}>
-            {busy ? 'Importing…' : direct ? 'Import and apply' : 'Import as proposal'}
+          {p && p.status !== 'approved' ? (
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => {
+                onClose();
+                navigate(`/?proposal=${p.id}`);
+              }}
+            >
+              Review proposal #{p.id}
+            </button>
+          ) : (
+            <button type="button" className="btn btn-primary" onClick={onClose}>
+              Done
+            </button>
+          )}
+          <button type="button" className="btn" onClick={() => setResult(null)}>
+            Import another file
           </button>
         </div>
-      </form>
-    </div>
+      </div>
+    );
+  }
+
+  return (
+    <form className="stack" onSubmit={submit}>
+      <p className="muted small" style={{ margin: 0 }}>
+        Paste or upload JSON. The import becomes one proposal: new routes are added, changed routes are updated, identical routes are
+        skipped, nothing is deleted.
+      </p>
+      <div className="row">
+        <span className="label">Source</span>
+        <span className="spacer" />
+        <label className="btn btn-sm">
+          Choose JSON file
+          <input type="file" accept=".json,application/json" onChange={onFile} hidden />
+        </label>
+      </div>
+      <textarea
+        className="mono"
+        rows={10}
+        spellCheck={false}
+        aria-label="Import JSON"
+        autoFocus
+        placeholder={'{ "endpoints": [ { "method": "GET", "path": "/users", "response": { "status": 200, "body": [] } } ] }\n\nor a whole OpenAPI 3 / Swagger 2 document'}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+      />
+      {!parsed.ok && <span className="error-text">Invalid JSON: {parsed.error}</span>}
+      {detected && (
+        <span className="small muted">
+          Detected {detected.format === 'openapi' ? 'an OpenAPI document' : 'hub endpoints'} with {plural(detected.count, 'endpoint')}.
+        </span>
+      )}
+
+      <div className="form-row-3">
+        <Field label="Format">
+          <select value={format} onChange={(e) => setFormat(e.target.value as Format)}>
+            <option value="auto">Detect automatically</option>
+            <option value="hub">Hub JSON</option>
+            <option value="openapi">OpenAPI / Swagger</option>
+          </select>
+        </Field>
+        <Field label="Kind">
+          <select value={kind} onChange={(e) => setKind(e.target.value as '' | ProposalKind)}>
+            <option value="">From my role</option>
+            <option value="publish">Contract</option>
+            <option value="request">Request</option>
+          </select>
+        </Field>
+      </div>
+      {effectiveFormat === 'openapi' && (
+        <div className="stack" style={{ gap: 6 }}>
+          <label className="checkbox">
+            <input type="checkbox" checked={overrideBase} onChange={(e) => setOverrideBase(e.target.checked)} />
+            Override the path prefix
+          </label>
+          <span className="small muted">By default the path of the document’s server URL or basePath goes in front of every route.</span>
+          {overrideBase && (
+            <input
+              type="text"
+              className="mono"
+              placeholder="empty = no prefix"
+              aria-label="Path prefix"
+              value={basePath}
+              onChange={(e) => setBasePath(e.target.value)}
+            />
+          )}
+        </div>
+      )}
+      <div className="form-row-2">
+        <Field label="Title" hint={detected?.wrapper?.title ? `Default: ${detected.wrapper.title}` : 'Default: Import N endpoint(s)'}>
+          <input type="text" maxLength={200} value={title} onChange={(e) => setTitle(e.target.value)} />
+        </Field>
+        <Field label="Message">
+          <input type="text" value={message} onChange={(e) => setMessage(e.target.value)} />
+        </Field>
+      </div>
+      {user.role === 'admin' && (
+        <label className="checkbox">
+          <input type="checkbox" checked={direct} onChange={(e) => setDirect(e.target.checked)} />
+          Apply immediately without review (admin)
+        </label>
+      )}
+      {error != null && <ErrorBox error={error} />}
+      <div className="row">
+        <button type="submit" className="btn btn-primary" disabled={busy || !detected || !parsed.ok}>
+          {busy ? 'Importing…' : direct ? 'Import and apply' : 'Import as proposal'}
+        </button>
+        <button type="button" className="btn" onClick={onClose}>
+          Cancel
+        </button>
+      </div>
+    </form>
   );
 }

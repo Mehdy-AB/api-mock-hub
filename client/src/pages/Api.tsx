@@ -1,7 +1,9 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { api, ApiError } from '../api';
 import { useUser } from '../auth';
+import { BackendBadge } from '../components/ActivityPanel';
 import { Empty, ErrorBox, Loading } from '../components/Common';
+import { importDialog } from '../components/ImportDialog';
 import { blankEndpoint, Errors, FormState, fromForm, normalizePath, toForm } from '../components/form-model';
 import { LazyProposalCard, ProposalCard } from '../components/ProposalCard';
 import { TryPanel } from '../components/TryPanel';
@@ -9,7 +11,7 @@ import { hubStore, isOpen, useHubData } from '../data';
 import { useAsync } from '../hooks';
 import { href } from '../router';
 import { useToast } from '../toast';
-import { ChangePayload, Endpoint, EndpointContent, HttpMethod, METHODS, Proposal } from '../types';
+import { ChangePayload, CommitSummary, Endpoint, EndpointContent, HttpMethod, METHODS, Proposal } from '../types';
 import { contentOf, errorText, exampleText, plural, routeKey, sameJson, timeAgo, uid } from '../util';
 import { canApprove, needsMyReview } from './Proposals';
 
@@ -415,6 +417,11 @@ export function ApiPage({
   }
   const approvable = hub.openProposals.filter((p) => canApprove(p, user, settings.data));
   const closedProposals = hub.proposals.filter((p) => p.status === 'rejected' || p.status === 'closed');
+  // Commits come newest first, so the first one seen per endpoint is its latest change.
+  const latestCommitByEndpoint = new Map<string, CommitSummary>();
+  for (const c of hub.commits) {
+    for (const id of c.endpointIds ?? []) if (!latestCommitByEndpoint.has(id)) latestCommitByEndpoint.set(id, c);
+  }
 
   const approveAll = async (list: Proposal[]) => {
     if (!window.confirm(`Approve ${plural(list.length, 'proposal')}? Approved edits go live.`)) return;
@@ -544,6 +551,7 @@ export function ApiPage({
             ) : e && dirty ? (
               <span className="badge badge-warn">edited</span>
             ) : null}
+            {e && latestCommitByEndpoint.has(e.id) && <BackendBadge status={latestCommitByEndpoint.get(e.id)!.backend} />}
             <span className={`http-status http-${String(c.response.status)[0]}`}>{c.response.status}</span>
             <span className="chev" aria-hidden="true">
               ▸
@@ -653,9 +661,9 @@ export function ApiPage({
           </p>
         </div>
         <div className="row">
-          <a className="btn" href={href('/import')}>
+          <button type="button" className="btn" onClick={importDialog.open}>
             Import
-          </a>
+          </button>
           <button type="button" className="btn btn-primary" onClick={() => addNew()}>
             + New endpoint
           </button>

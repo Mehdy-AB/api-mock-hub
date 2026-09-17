@@ -1,10 +1,11 @@
 import { Body, Controller, Get, HttpCode, NotFoundException, Param, ParseIntPipe, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
-import { CurrentUser } from '../auth/decorators';
+import { CurrentUser, Roles } from '../auth/decorators';
+import { clean, nowIso } from '../common/util';
 import { API_BASE } from '../constants';
 import { AuthUser } from '../storage/models';
 import { StoreService } from '../storage/store.service';
-import { CreateProposalDto, ReasonDto } from './proposal.dto';
+import { BackendStatusDto, CreateProposalDto, ReasonDto } from './proposal.dto';
 import { ProposalsService } from './proposals.service';
 import { changeRoute, changeWithDiff } from './view';
 
@@ -24,6 +25,19 @@ export class CommitsController {
   })
   create(@Body() dto: CreateProposalDto, @CurrentUser() user: AuthUser) {
     return this.proposals.commitDirect(dto, user);
+  }
+
+  @Post(':id/backend')
+  @HttpCode(200)
+  @Roles('admin', 'backend')
+  @ApiOperation({ summary: 'Mark whether the real backend implements this commit (backend or admin)' })
+  markBackend(@Param('id', ParseIntPipe) id: number, @Body() dto: BackendStatusDto, @CurrentUser() user: AuthUser) {
+    return this.store.write(['commits'], (db) => {
+      const commit = db.commits.find((c) => c.id === id);
+      if (!commit) throw new NotFoundException(`Commit ${id} not found`);
+      commit.backend = clean({ done: dto.done, by: user.username, at: nowIso(), note: dto.note?.trim() || undefined });
+      return structuredClone({ ...commit, changes: commit.changes.map(changeWithDiff) });
+    });
   }
 
   @Post(':id/discard')
@@ -58,6 +72,7 @@ export class CommitsController {
         direct: c.direct,
         revertOf: c.revertOf,
         revertedBy: c.revertedBy,
+        backend: c.backend,
       }));
   }
 

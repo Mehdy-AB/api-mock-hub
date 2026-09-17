@@ -134,6 +134,14 @@ export interface CommitSummary {
   direct?: boolean;
   revertOf?: number;
   revertedBy?: RevertInfo;
+  backend?: BackendStatus;
+}
+
+export interface BackendStatus {
+  done: boolean;
+  by: string;
+  at: string;
+  note?: string;
 }
 
 export interface RevertInfo {
@@ -154,6 +162,7 @@ export interface Commit {
   direct?: boolean;
   revertOf?: number;
   revertedBy?: RevertInfo;
+  backend?: BackendStatus;
 }
 
 export interface AuthUser {

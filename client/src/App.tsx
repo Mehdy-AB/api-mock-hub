@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect } from 'react';
 import { useAuth, useUser } from './auth';
 import { ActivityPanel } from './components/ActivityPanel';
+import { ImportDialog, importDialog } from './components/ImportDialog';
 import { Loading, NotFound } from './components/Common';
 import { hubStore, useHubData } from './data';
 import { draftStore, useDraft } from './draft';
@@ -14,7 +15,6 @@ import { href, Route, useRoute } from './router';
 // Loaded on demand; the API page loads the code editor itself when a row opens.
 const EndpointEditorPage = lazy(() => import('./pages/EndpointEditor').then((m) => ({ default: m.EndpointEditorPage })));
 const CommitPage = lazy(() => import('./pages/Commit').then((m) => ({ default: m.CommitPage })));
-const ImportPage = lazy(() => import('./pages/Import').then((m) => ({ default: m.ImportPage })));
 const AdminPage = lazy(() => import('./pages/Admin').then((m) => ({ default: m.AdminPage })));
 const HistoryPage = lazy(() => import('./pages/History').then((m) => ({ default: m.HistoryPage })));
 const AccountPage = lazy(() => import('./pages/Account').then((m) => ({ default: m.AccountPage })));
@@ -48,9 +48,9 @@ function Header({ section }: { section?: string }) {
         )}
         <span className="spacer" />
         <nav className="header-right" aria-label="More">
-          <a className="btn btn-sm btn-ghost" href={href('/import')}>
+          <button type="button" className="btn btn-sm btn-ghost" onClick={importDialog.open}>
             Import
-          </a>
+          </button>
           {user.role === 'admin' && (
             <a className="btn btn-sm btn-ghost" href={href('/admin')}>
               Admin
@@ -92,7 +92,8 @@ function Page({ route }: { route: Route }) {
     case 'history':
       return <HistoryPage focus={Number(q.get('commit')) || null} />;
     case 'import':
-      return <ImportPage />;
+      // Import is a popup now; old links land on the API page with it open.
+      return <ApiPage key="api" />;
     case 'admin':
       return <AdminPage />;
     case 'account':
@@ -110,7 +111,11 @@ export function App() {
 
   useEffect(() => {
     if (!route.segments[1] || route.segments[0] !== 'endpoints') window.scrollTo(0, 0);
-  }, [route.path]);
+    if (user && route.segments[0] === 'import') {
+      importDialog.open();
+      window.location.replace('#/');
+    }
+  }, [route.path, user]);
 
   // Keep the shared cache fresh while the tab is visible.
   useEffect(() => {
@@ -153,6 +158,7 @@ export function App() {
           </aside>
         )}
       </div>
+      <ImportDialog />
     </>
   );
 }

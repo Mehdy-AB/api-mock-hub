@@ -4,6 +4,7 @@ import {
   ArrayMaxSize,
   ArrayMinSize,
   IsArray,
+  IsBoolean,
   IsIn,
   IsInt,
   IsNotEmpty,
@@ -129,6 +130,18 @@ export class CommentDto {
   @IsNotEmpty()
   @MaxLength(10000)
   text: string;
+}
+
+export class BackendStatusDto {
+  @ApiProperty({ example: true, description: 'true = the real backend implements this commit' })
+  @IsBoolean()
+  done: boolean;
+
+  @ApiPropertyOptional({ example: 'Merged in backend PR #42' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  note?: string;
 }
 
 export class ReasonDto {

@@ -256,6 +256,28 @@ describe('API Mock Hub end to end', () => {
     await http.get('/_hub/api/proposals?status=open,bogus').set(as('fay')).expect(400);
   });
 
+  it('tracks which commits are done in the real backend', async () => {
+    const saved = await http
+      .post('/_hub/api/commits')
+      .set(as('bob'))
+      .send({ title: 'backend tracking', changes: [{ type: 'add', endpoint: { method: 'GET', path: '/backend-track', response: { body: {} } } }] })
+      .expect(201);
+    const id = saved.body.commitId;
+    const find = async () =>
+      (await http.get('/_hub/api/commits').set(as('fay')).expect(200)).body.find((c: { id: number }) => c.id === id);
+    expect((await find()).backend).toBeUndefined();
+
+    await http.post(`/_hub/api/commits/${id}/backend`).set(as('fay')).send({ done: true }).expect(403);
+    await http.post(`/_hub/api/commits/${id}/backend`).set(as('bob')).send({ done: 'yes' }).expect(400);
+    const marked = await http.post(`/_hub/api/commits/${id}/backend`).set(as('bob')).send({ done: true, note: 'PR #12' }).expect(200);
+    expect(marked.body.backend).toMatchObject({ done: true, by: 'bob', note: 'PR #12' });
+    expect((await find()).backend.done).toBe(true);
+
+    await http.post(`/_hub/api/commits/${id}/backend`).set(as('admin')).send({ done: false }).expect(200);
+    expect((await find()).backend).toMatchObject({ done: false, by: 'admin' });
+    await http.post('/_hub/api/commits/99999/backend').set(as('admin')).send({ done: true }).expect(404);
+  });
+
   it('lets admins approve their own proposals', async () => {
     const p = await http
       .post('/_hub/api/proposals')

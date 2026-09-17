@@ -15,6 +15,7 @@ Every change is recorded as a commit or a reviewed proposal, so nobody waits for
 - **Save or propose.** Save applies your edits at once as a commit. Propose sends them for review; nothing goes live until someone approves.
 - **Review on the same page.** Open proposals show every edit as a readable diff (`GET /users?page=1`, old values in red, new in green), a discussion thread, and Approve, Request changes, Reject and Withdraw buttons. Authors edit a proposal in place.
 - **History you can undo.** Every commit is listed in the side panel with its diff. Any teammate can discard a commit, which undoes it for everyone as a new commit.
+- **Real backend tracking.** The backend team marks each commit as done or not done in the real backend, with a note such as a PR link. History filters by that status, and each endpoint shows whether its latest change is in the real backend yet.
 - **Safe concurrent editing.** Endpoints are versioned. If someone saves the same endpoint while you edit, you choose to keep your edits or take theirs.
 - **Bulk changes.** Tick endpoints to set a delay or status, add or remove a tag, or delete them together.
 - **Import and export.** Import hub JSON or a whole OpenAPI 3 / Swagger 2 document; export the live set as hub JSON or OpenAPI.
@@ -79,6 +80,8 @@ Everything happens on the API page.
 2. **Save or Propose.** As soon as something differs from the live version, a bar appears at the bottom with an optional message, **Cancel**, **Propose** and **Save**. Edits across several endpoints go into one commit or proposal.
 3. **Review.** Open proposals appear at the top of the page, with their edits, discussion and review buttons. Proposals waiting for you open automatically, and the header shows how many there are.
 4. **History.** The side panel lists commits. Open one to see what changed, and discard it if needed. When an endpoint is selected, the panel shows only that endpoint's proposals and history.
+5. **Real backend.** Each commit shows "✓ in backend" or "not in backend". Backend users and admins open a commit and click **Mark done in backend**, optionally with a note. Filter History by "Not in backend" to see what the real backend still has to build.
+6. **Import.** The Import button opens a popup: paste or upload hub JSON or an OpenAPI file, and the result appears right there.
 
 A mock `404` response includes a `create` link that opens a new endpoint row with the method and path filled in.
 
@@ -161,6 +164,7 @@ curl -i $HUB/users/42
 | `POST /proposals/{id}/reject` / `close` | Reject as a reviewer, or withdraw as the author |
 | `GET /commits` / `GET /commits/{id}` | History, and one commit with diffs |
 | `POST /commits/{id}/discard` | Undo a commit for everyone, as a new commit |
+| `POST /commits/{id}/backend` | Backend or admin: `{"done": true, "note": "PR #42"}` marks whether the real backend implements it |
 
 **Conflicts.** Every endpoint has a version. If two changes edit the same endpoint, the first one applied wins.
 The other is marked `conflict`, and its author rebases or edits it. A commit can't be discarded while a later commit changed the same endpoint; discard the later one first.

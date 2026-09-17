@@ -122,6 +122,15 @@ export interface Commit {
   revertOf?: number;
   /** Set when a later commit undid this one. */
   revertedBy?: { commitId: number; by: string; at: string };
+  /** Whether the real backend implements this change yet, as marked by the backend team. */
+  backend?: BackendStatus;
+}
+
+export interface BackendStatus {
+  done: boolean;
+  by: string;
+  at: string;
+  note?: string;
 }
 
 export interface User {

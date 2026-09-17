@@ -127,6 +127,8 @@ export const api = {
   commit: (commitId: number) => request<Commit>('GET', `/commits/${id(commitId)}`),
   /** Save and apply at once; returns the applied proposal (with commitId). */
   directCommit: (body: ProposalPayload) => request<Proposal>('POST', '/commits', body),
+  markBackend: (commitId: number, done: boolean, note?: string) =>
+    request<Commit>('POST', `/commits/${id(commitId)}/backend`, { done, note: note || undefined }),
   discardCommit: (commitId: number, reason?: string) =>
     request<{ commit: Commit; discardCommitId: number }>('POST', `/commits/${id(commitId)}/discard`, {
       reason: reason || undefined,
