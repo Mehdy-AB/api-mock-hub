@@ -1,4 +1,4 @@
-import type { EndpointContent, MockResponse, ParamDoc, RequestDoc } from '../types';
+import type { EndpointContent, MockResponse, ParamDoc, RequestDoc, ResponseCase } from '../types';
 import { exampleText, pretty } from '../util';
 import { RequestLine } from './ReadableDiff';
 
@@ -68,6 +68,24 @@ export function ResponseView({ response }: { response: MockResponse }) {
   );
 }
 
+/** Every case this endpoint can answer with, the live one marked. */
+export function ResponseCasesView({ cases, activeId }: { cases: ResponseCase[]; activeId?: string }) {
+  return (
+    <div className="stack">
+      {cases.map((c) => (
+        <div key={c.id} className="stack" style={{ gap: 6 }}>
+          <div className="row">
+            <strong>{c.name}</strong>
+            {c.id === activeId && <span className="badge badge-ok">returned now</span>}
+            {c.description && <span className="muted small">{c.description}</span>}
+          </div>
+          <ResponseView response={c} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 /** The request written like the real call, with notes for documented params. */
 export function RequestView({ method, path, request }: { method: string; path: string; request?: RequestDoc }) {
   const headers = request?.headers ?? [];
@@ -130,7 +148,7 @@ export function EndpointSummary({ content }: { content: EndpointContent }) {
         </div>
       )}
       {content.description && <p className="muted pre-wrap">{content.description}</p>}
-      <ResponseView response={content.response} />
+      <ResponseCasesView cases={content.responses} />
       <RequestView method={content.method} path={content.path} request={content.request} />
     </div>
   );

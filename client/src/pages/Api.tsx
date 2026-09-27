@@ -11,7 +11,7 @@ import { hubStore, isOpen, useHubData } from '../data';
 import { useAsync } from '../hooks';
 import { href } from '../router';
 import { useToast } from '../toast';
-import { ChangePayload, CommitSummary, Endpoint, EndpointContent, HttpMethod, METHODS, Proposal } from '../types';
+import { ChangePayload, CommitSummary, Endpoint, EndpointContent, HttpMethod, METHODS, Proposal, ResponseCase } from '../types';
 import { contentOf, errorText, exampleText, plural, routeKey, sameJson, timeAgo, uid } from '../util';
 import { canApprove, needsMyReview } from './Proposals';
 
@@ -51,10 +51,11 @@ const emptyPersisted = (owner: string): Persisted => ({
 // Survives navigating to other screens (not a reload), so unsaved edits aren't lost.
 let persisted: Persisted = emptyPersisted('');
 
-type BulkAction = 'delay' | 'status' | 'addTag' | 'removeTag' | 'delete';
+type BulkAction = 'activeCase' | 'delay' | 'status' | 'addTag' | 'removeTag' | 'delete';
 const BULK: { id: BulkAction; label: string; placeholder?: string; numeric?: boolean }[] = [
-  { id: 'delay', label: 'Set delay (ms)', placeholder: '0 to 60000', numeric: true },
-  { id: 'status', label: 'Set status', placeholder: '100 to 599', numeric: true },
+  { id: 'activeCase', label: 'Return case now' },
+  { id: 'delay', label: 'Set delay, all cases (ms)', placeholder: '0 to 60000', numeric: true },
+  { id: 'status', label: 'Set status of the live case', placeholder: '100 to 599', numeric: true },
   { id: 'addTag', label: 'Add tag', placeholder: 'tag' },
   { id: 'removeTag', label: 'Remove tag', placeholder: 'tag' },
   { id: 'delete', label: 'Delete' },
@@ -65,7 +66,7 @@ const freshEdit = (e: Endpoint): Edit => ({
   endpointId: e.id,
   baseVersion: e.version,
   base: contentOf(e),
-  form: toForm(e),
+  form: toForm(e, e.active?.caseId),
   errors: {},
   serverErrors: [],
 });
@@ -82,10 +83,19 @@ function preview(ed: Edit | undefined, e: Endpoint | null): EndpointContent {
   if (ed) {
     const r = fromForm(ed.form);
     if (r.value) return r.value;
-    return { ...blankEndpoint(ed.form.method, normalizePath(ed.form.path) || '/'), response: { status: Number(ed.form.status) || 200 } };
+    // Still typing (or briefly invalid): show the cases as entered, so the header keeps up.
+    const b = blankEndpoint(ed.form.method, normalizePath(ed.form.path) || '/');
+    const responses = ed.form.cases.map((c) => ({ id: c.id, name: c.name, status: Number(c.status) || 200 }));
+    return { ...b, responses: responses.length ? responses : b.responses };
   }
   return e ? contentOf(e) : blankEndpoint();
 }
+
+/** The case a row shows: the live one when nothing is being edited, else the first. */
+const shownCase = (c: EndpointContent, e: Endpoint | null): ResponseCase => {
+  const id = e?.active?.caseId;
+  return (id ? c.responses.find((x) => x.id === id) : undefined) ?? c.responses[0];
+};
 
 const routeOfEdit = (ed: Edit) => {
   const c = preview(ed, null);
@@ -136,6 +146,7 @@ export function ApiPage({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkAction, setBulkAction] = useState<BulkAction>('delay');
   const [bulkValue, setBulkValue] = useState('');
+  const [switching, setSwitching] = useState<Set<string>>(new Set());
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [proposalOpen, setProposalOpen] = useState<Record<number, boolean>>({});
@@ -252,6 +263,29 @@ export function ApiPage({
   };
   const markRemove = (key: string, remove: boolean) =>
     setEdits((p) => ({ ...p, [key]: { ...p[key], remove, serverErrors: [] } }));
+
+  /**
+   * Switch which case a route answers with. This is a setting, not an edit: it applies at once
+   * for everybody, needs no approval and leaves no commit behind.
+   */
+  const switchCase = async (e: Endpoint, caseId: string) => {
+    setSwitching((s) => new Set(s).add(e.id));
+    try {
+      const updated = await api.setActiveCase(e.id, caseId);
+      hubStore.patchEndpoint(updated);
+      const c = updated.responses.find((x) => x.id === updated.active?.caseId) ?? updated.responses[0];
+      toast(`${e.method} ${e.path} now returns ${c.name} (${c.status})`);
+    } catch (err) {
+      toast(errorText(err), 'error');
+      hubStore.refresh();
+    } finally {
+      setSwitching((s) => {
+        const next = new Set(s);
+        next.delete(e.id);
+        return next;
+      });
+    }
+  };
 
   /** After a conflict: keep my edits and base them on the newest live version (fetched fresh, not from cache). */
   const keepMine = async (key: string) => {
@@ -460,10 +494,27 @@ export function ApiPage({
   const allSelected = visibleIds.length > 0 && visibleIds.every((id) => selected.has(id));
   const currentBulk = BULK.find((b) => b.id === bulkAction)!;
 
-  const applyBulk = () => {
+  const caseChoices = [...new Set([...selected].flatMap((id) => byId.get(id)?.responses.map((c) => c.name) ?? []))].sort();
+
+  const applyBulk = async () => {
     const v = bulkValue.trim();
     const n = Number(v);
-    if (bulkAction !== 'delete' && !v) return toast('Enter a value first', 'error');
+    if (bulkAction !== 'delete' && !v) return toast(bulkAction === 'activeCase' ? 'Pick a case first' : 'Enter a value first', 'error');
+    if (bulkAction === 'activeCase') {
+      try {
+        const r = await api.setActiveCases([...selected], v);
+        await hubStore.refresh();
+        const skipped = r.skipped.length
+          ? ` Skipped ${r.skipped.length}: ${r.skipped.slice(0, 3).map((x) => `${x.endpoint} (${x.reason})`).join('; ')}`
+          : '';
+        toast(`${plural(r.changed.length, 'endpoint')} now return “${v}”.${skipped}`, r.skipped.length ? 'error' : 'ok');
+        setSelected(new Set());
+        setBulkValue('');
+      } catch (e) {
+        toast(errorText(e), 'error');
+      }
+      return;
+    }
     if (bulkAction === 'delay' && (!Number.isInteger(n) || n < 0 || n > 60000)) return toast('Delay must be 0 to 60000 ms', 'error');
     if (bulkAction === 'status' && (!Number.isInteger(n) || n < 100 || n > 599)) return toast('Status must be 100 to 599', 'error');
     setEdits((p) => {
@@ -477,13 +528,17 @@ export function ApiPage({
           continue;
         }
         const c = structuredClone(fromForm(ed.form).value ?? contentOf(live));
+        const liveIdx = Math.max(0, c.responses.findIndex((r) => r.id === live.active?.caseId));
         if (bulkAction === 'delay') {
-          if (n > 0) c.response.delayMs = n;
-          else delete c.response.delayMs;
-        } else if (bulkAction === 'status') c.response.status = n;
-        else if (bulkAction === 'addTag') c.tags = [...new Set([...c.tags, v])];
+          c.responses = c.responses.map((r) => {
+            const { delayMs: _drop, ...rest } = r;
+            return n > 0 ? { ...rest, delayMs: n } : rest;
+          });
+        } else if (bulkAction === 'status') {
+          c.responses = c.responses.map((r, i) => (i === liveIdx ? { ...r, status: n } : r));
+        } else if (bulkAction === 'addTag') c.tags = [...new Set([...c.tags, v])];
         else if (bulkAction === 'removeTag') c.tags = c.tags.filter((t) => t !== v);
-        next[id] = { ...ed, remove: false, form: toForm(c), errors: {}, serverErrors: [] };
+        next[id] = { ...ed, remove: false, form: toForm(c, c.responses[liveIdx]?.id), errors: {}, serverErrors: [] };
       }
       return next;
     });
@@ -497,6 +552,7 @@ export function ApiPage({
     const isOpenRow = open.has(key);
     const dirty = ed ? isDirty(ed) : false;
     const c = preview(ed, e);
+    const shown = shownCase(c, e);
     const qs = queryText(c);
     const collision =
       isOpenRow && ed && !ed.remove
@@ -552,11 +608,28 @@ export function ApiPage({
               <span className="badge badge-warn">edited</span>
             ) : null}
             {e && latestCommitByEndpoint.has(e.id) && <BackendBadge status={latestCommitByEndpoint.get(e.id)!.backend} />}
-            <span className={`http-status http-${String(c.response.status)[0]}`}>{c.response.status}</span>
+            <span className={`http-status http-${String(shown.status)[0]}`}>{shown.status}</span>
             <span className="chev" aria-hidden="true">
               ▸
             </span>
           </button>
+          {e && e.responses.length > 1 && (
+            <label className="op-case" title="What this route returns right now. Applies at once, no review.">
+              <span className="muted small">returns</span>
+              <select
+                aria-label={`Response case for ${e.method} ${e.path}`}
+                value={shown.id}
+                disabled={switching.has(e.id)}
+                onChange={(ev) => switchCase(e, ev.target.value)}
+              >
+                {e.responses.map((rc) => (
+                  <option key={rc.id} value={rc.id}>
+                    {rc.name} · {rc.status}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           {e &&
             (pendingById.get(e.id) ?? []).map((pid) => (
               <a key={pid} className="badge status-open op-prop" href={href(`/?proposal=${pid}`)} title="An open proposal changes this endpoint">
@@ -595,7 +668,14 @@ export function ApiPage({
               <div className={e ? 'op-grid' : ''}>
                 <div className="op-edit">
                   <Suspense fallback={<Loading label="Loading editor…" />}>
-                    <EndpointFields form={ed.form} onChange={(f) => setForm(key, f)} errors={ed.errors} idPrefix={key} />
+                    <EndpointFields
+                      form={ed.form}
+                      onChange={(f) => setForm(key, f)}
+                      errors={ed.errors}
+                      idPrefix={key}
+                      activeCaseId={e ? shownCase(contentOf(e), e).id : undefined}
+                      onActivate={e ? (caseId) => switchCase(e, caseId) : undefined}
+                    />
                   </Suspense>
                   {collision && (
                     <div className="banner banner-warn" style={{ marginTop: 10 }}>
@@ -654,7 +734,8 @@ export function ApiPage({
         <div>
           <h1>API</h1>
           <p className="muted">
-            {plural(hub.endpoints.length, 'endpoint')}. Open one and edit it directly.{' '}
+            {plural(hub.endpoints.length, 'endpoint')}. Open one and edit it directly. Each one can hold several response
+            cases (success, errors…); the “returns” picker switches the live one at once, with no review.{' '}
             {direct
               ? 'Save makes it live at once (teammates can discard it). Propose waits for approval.'
               : 'Propose sends your edits for review; approved proposals go live.'}
@@ -707,19 +788,31 @@ export function ApiPage({
               </option>
             ))}
           </select>
-          {bulkAction !== 'delete' && (
-            <input
-              type={currentBulk.numeric ? 'number' : 'text'}
-              aria-label="Bulk value"
-              placeholder={currentBulk.placeholder}
-              value={bulkValue}
-              onChange={(e) => setBulkValue(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && applyBulk()}
-            />
+          {bulkAction === 'activeCase' ? (
+            <select aria-label="Case to return" value={bulkValue} onChange={(e) => setBulkValue(e.target.value)}>
+              <option value="">Pick a case…</option>
+              {caseChoices.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+            </select>
+          ) : (
+            bulkAction !== 'delete' && (
+              <input
+                type={currentBulk.numeric ? 'number' : 'text'}
+                aria-label="Bulk value"
+                placeholder={currentBulk.placeholder}
+                value={bulkValue}
+                onChange={(e) => setBulkValue(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && applyBulk()}
+              />
+            )
           )}
           <button type="button" className={`btn btn-sm ${bulkAction === 'delete' ? 'btn-danger' : 'btn-primary'}`} onClick={applyBulk}>
-            Apply
+            {bulkAction === 'activeCase' ? 'Apply now' : 'Apply'}
           </button>
+          {bulkAction === 'activeCase' && <span className="muted small">Live at once, no review</span>}
           <button type="button" className="btn btn-sm btn-ghost" onClick={() => setSelected(new Set())}>
             Clear
           </button>

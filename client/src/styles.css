@@ -506,3 +506,22 @@ details > summary { cursor: pointer; font-weight: 600; }
 .toast-error { background: var(--danger); color: #fff; }
 
 .sticky-actions { position: sticky; bottom: 0; background: var(--bg); padding: 12px 0; border-top: 1px solid var(--border); display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* ---------- response cases ---------- */
+.op-case { display: flex; align-items: center; gap: 6px; padding: 0 10px 0 0; flex: 0 0 auto; }
+.op-case select { max-width: 190px; padding: 3px 6px; font-size: 12px; }
+.case-tabs { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.case-tab {
+  display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font: inherit; font-size: 13px;
+  padding: 5px 10px; border: 1px solid var(--border); border-radius: 999px;
+  background: var(--surface); color: var(--muted);
+}
+.case-tab:hover { color: var(--text); border-color: var(--border-strong); }
+.case-tab.active { background: var(--accent-soft); border-color: transparent; color: var(--accent); font-weight: 600; }
+.case-tab.live { border-color: var(--ok); }
+.case-tab.bad { border-color: var(--danger); color: var(--danger); }
+.case-tab .http-status { min-width: 0; }
+.live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); }
+.case-add { border-style: dashed; }
+.case-editor { border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; background: var(--surface-2); }
+.rd-case-flag { margin-left: 6px; }

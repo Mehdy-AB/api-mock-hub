@@ -1,4 +1,4 @@
-import type { EndpointContent } from './types';
+import type { Endpoint, EndpointContent, ResponseCase } from './types';
 
 export function pretty(v: unknown): string {
   return v === undefined ? '' : JSON.stringify(v, null, 2);
@@ -51,11 +51,21 @@ export function sameJson(a: unknown, b: unknown): boolean {
 }
 
 export function contentOf(e: EndpointContent): EndpointContent {
-  const c: EndpointContent = { method: e.method, path: e.path, tags: e.tags ?? [], response: e.response };
+  const c: EndpointContent = { method: e.method, path: e.path, tags: e.tags ?? [], responses: e.responses };
   if (e.summary !== undefined) c.summary = e.summary;
   if (e.description !== undefined) c.description = e.description;
   if (e.request !== undefined) c.request = e.request;
   return JSON.parse(JSON.stringify(c));
+}
+
+/** The case an endpoint serves right now: the selected one, or the first. */
+export function activeCase(e: Endpoint | EndpointContent): ResponseCase {
+  const id = 'active' in e ? e.active?.caseId : undefined;
+  return (id ? e.responses.find((c) => c.id === id) : undefined) ?? e.responses[0];
+}
+
+export function caseLabel(c: ResponseCase): string {
+  return `${c.name} · ${c.status}`;
 }
 
 const NAME = /[:*]([A-Za-z_$][\w$]*)/g;

@@ -2,7 +2,7 @@ import { applyChanges, checkApplicable } from '../src/proposals/apply';
 import { Endpoint, EndpointContent } from '../src/storage/models';
 
 const content = (method: string, path: string, body: unknown = {}): EndpointContent =>
-  ({ method, path, tags: [], response: { status: 200, body } }) as EndpointContent;
+  ({ method, path, tags: [], responses: [{ id: 'success', name: 'Success', status: 200, body }] }) as EndpointContent;
 
 const live = (id: string, method: string, path: string, version = 1): Endpoint => ({
   ...content(method, path),
@@ -24,8 +24,20 @@ describe('checkApplicable / applyChanges', () => {
     expect(checkApplicable([users], changes)).toEqual([]);
     const r = applyChanges([users], changes, 'sara', 'now');
     expect(r.endpoints).toHaveLength(2);
-    expect(r.endpoints.find((e) => e.id === 'u')).toMatchObject({ version: 3, owner: 'sara', response: { body: { a: 1 } } });
+    expect(r.endpoints.find((e) => e.id === 'u')).toMatchObject({ version: 3, owner: 'sara', responses: [{ body: { a: 1 } }] });
     expect(r.changes[0].endpointId).toBeDefined();
+  });
+
+  it('keeps the live case selection across an edit, and drops it when the case is gone', () => {
+    const picked: Endpoint = { ...users, active: { caseId: 'success', by: 'fay', at: 'now' } };
+    const kept = applyChanges([picked], [
+      { type: 'update', endpointId: 'u', baseVersion: 2, before: picked, after: content('GET', '/users/:id', { a: 1 }) },
+    ], 'sara', 'now');
+    expect(kept.endpoints[0].active).toEqual({ caseId: 'success', by: 'fay', at: 'now' });
+
+    const renamed = { ...content('GET', '/users/:id'), responses: [{ id: 'other', name: 'Other', status: 500 }] } as EndpointContent;
+    const dropped = applyChanges([picked], [{ type: 'update', endpointId: 'u', baseVersion: 2, before: picked, after: renamed }], 'sara', 'now');
+    expect(dropped.endpoints[0].active).toBeUndefined();
   });
 
   it('flags stale versions', () => {

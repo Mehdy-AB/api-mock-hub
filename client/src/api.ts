@@ -103,6 +103,15 @@ export const api = {
 
   endpoints: () => request<Endpoint[]>('GET', '/endpoints'),
   endpoint: (endpointId: string) => request<Endpoint>('GET', `/endpoints/${id(endpointId)}`),
+  /** Switch what a route returns right now. Instant: no proposal, no review, no commit. */
+  setActiveCase: (endpointId: string, caseRef: string) =>
+    request<Endpoint>('PUT', `/endpoints/${id(endpointId)}/active-case`, { case: caseRef }),
+  setActiveCases: (endpointIds: string[], caseRef: string) =>
+    request<{ case: string; changed: string[]; skipped: { endpoint: string; reason: string }[] }>(
+      'POST',
+      '/endpoints/active-case',
+      { endpointIds, case: caseRef },
+    ),
 
   proposals: (q: { status?: string; endpointId?: string } = {}) =>
     request<ProposalSummary[]>('GET', `/proposals${qs(q)}`),

@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Allow } from 'class-validator';
+import { Allow, ArrayMaxSize, ArrayNotEmpty, IsArray, IsNotEmpty, IsString, MaxLength } from 'class-validator';
 import { HTTP_METHODS, HttpMethod } from '../storage/models';
 
 /*
@@ -53,6 +53,34 @@ export class MockResponseDto {
   delayMs?: number;
 }
 
+export class ResponseCaseDto extends MockResponseDto {
+  @ApiPropertyOptional({ example: 'not-found', description: 'Stable id. Derived from the name when left out.' })
+  id?: string;
+
+  @ApiPropertyOptional({ example: 'Not found', description: 'Shown in the switch. Defaults to the status name.' })
+  name?: string;
+
+  @ApiPropertyOptional({ example: 'When the id does not exist' })
+  description?: string;
+}
+
+export class ActiveCaseDto {
+  @ApiProperty({ example: 'not-found', description: 'Case id or name. Applies at once: no proposal, no review.' })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(60)
+  case: string;
+}
+
+export class BulkActiveCaseDto extends ActiveCaseDto {
+  @ApiProperty({ type: [String], description: 'Endpoints to switch. Those without that case are reported as skipped.' })
+  @IsArray()
+  @ArrayNotEmpty()
+  @ArrayMaxSize(500)
+  @IsString({ each: true })
+  endpointIds: string[];
+}
+
 export class EndpointInputDto {
   @ApiProperty({ enum: [...HTTP_METHODS], example: 'GET' })
   @Allow()
@@ -78,7 +106,18 @@ export class EndpointInputDto {
   @Allow()
   request?: RequestDocDto;
 
-  @ApiProperty({ type: MockResponseDto })
+  @ApiPropertyOptional({
+    type: [ResponseCaseDto],
+    description: 'Every answer this endpoint can give. The first one is served until someone switches the case.',
+    example: [
+      { name: 'Success', status: 200, body: { id: 1, name: 'Sara' } },
+      { name: 'Not found', status: 404, body: { error: 'User not found' } },
+    ],
+  })
   @Allow()
-  response: MockResponseDto;
+  responses?: ResponseCaseDto[];
+
+  @ApiPropertyOptional({ type: MockResponseDto, description: 'Shorthand for a single case. Use "responses" for more.' })
+  @Allow()
+  response?: MockResponseDto;
 }

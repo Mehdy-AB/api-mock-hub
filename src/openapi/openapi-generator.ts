@@ -1,7 +1,8 @@
 import { isPlainObject } from '../common/json-utils';
 import { clean } from '../common/util';
-import { pathParamNames, routeLabel, toOpenApiPath } from '../endpoints/route-rules';
-import { Endpoint, ParamDoc } from '../storage/models';
+import { MOCK_CASE_HEADER, MOCK_CASE_QUERY } from '../constants';
+import { activeCase, pathParamNames, routeLabel, toOpenApiPath } from '../endpoints/route-rules';
+import { Endpoint, ParamDoc, ResponseCase } from '../storage/models';
 
 type Json = Record<string, unknown>;
 
@@ -35,6 +36,43 @@ function parameter(doc: ParamDoc | undefined, name: string, where: string, requi
   });
 }
 
+/** One OpenAPI response per status code; cases sharing a status become named examples. */
+function responsesByStatus(cases: ResponseCase[], live: ResponseCase): Json {
+  const byStatus = new Map<number, ResponseCase[]>();
+  for (const c of cases) byStatus.set(c.status, [...(byStatus.get(c.status) ?? []), c]);
+
+  const out: Json = {};
+  for (const [status, list] of byStatus) {
+    const headerEntries = Object.entries(list[0].headers ?? {});
+    const contentType =
+      headerEntries.find(([k]) => k.toLowerCase() === 'content-type')?.[1].split(';')[0].trim() || 'application/json';
+    const withBody = list.filter((c) => c.body !== undefined && c.body !== null);
+    const label = (c: ResponseCase) =>
+      [c.name, c.id === live.id ? '(returned now)' : '', c.description].filter(Boolean).join(' ');
+    out[String(status)] = clean({
+      description: list.map(label).join(' · ') || 'Mock response',
+      headers: headerEntries.length
+        ? Object.fromEntries(headerEntries.map(([k, v]) => [k, { schema: { type: 'string', example: v } }]))
+        : undefined,
+      content: withBody.length
+        ? {
+            [contentType]: clean({
+              schema: inferSchema(withBody[0].body),
+              example: withBody.length === 1 ? withBody[0].body : undefined,
+              examples:
+                withBody.length > 1
+                  ? Object.fromEntries(
+                      withBody.map((c) => [c.id, clean({ summary: label(c), description: c.description, value: c.body })]),
+                    )
+                  : undefined,
+            }),
+          }
+        : undefined,
+    });
+  }
+  return out;
+}
+
 /** OpenAPI 3 document describing the live mock endpoints. */
 export function generateOpenApi(endpoints: Endpoint[], meta: { commitId: number }): Json {
   const paths: Record<string, Json> = {};
@@ -51,14 +89,16 @@ export function generateOpenApi(endpoints: Endpoint[], meta: { commitId: number 
     const opTags = e.tags.length ? e.tags : ['untagged'];
     opTags.forEach((t) => tags.add(t));
 
-    const r = e.response;
-    const headerEntries = Object.entries(r.headers ?? {});
-    const contentType =
-      headerEntries.find(([k]) => k.toLowerCase() === 'content-type')?.[1].split(';')[0].trim() || 'application/json';
-    const hasBody = r.body !== undefined && r.body !== null;
-
+    const live = activeCase(e);
     const meta_ = [`Mock v${e.version} by \`${e.owner}\`, updated ${e.updatedAt}`];
-    if (r.delayMs) meta_.push(`simulated delay ${r.delayMs} ms`);
+    if (live.delayMs) meta_.push(`simulated delay ${live.delayMs} ms`);
+    if (e.responses.length > 1) {
+      meta_.push(
+        `returns **${live.name}** right now; ` +
+          `cases: ${e.responses.map((c) => `\`${c.id}\` ${c.status}`).join(', ')} ` +
+          `(send \`${MOCK_CASE_HEADER}: <id>\` or \`?${MOCK_CASE_QUERY}=<id>\` for one call)`,
+      );
+    }
 
     const operation = clean({
       tags: opTags,
@@ -70,16 +110,15 @@ export function generateOpenApi(endpoints: Endpoint[], meta: { commitId: number 
         req.bodyExample !== undefined && e.method !== 'GET' && e.method !== 'HEAD'
           ? { content: { 'application/json': { schema: inferSchema(req.bodyExample), example: req.bodyExample } } }
           : undefined,
-      responses: {
-        [String(r.status)]: clean({
-          description: `Mock response`,
-          headers: headerEntries.length
-            ? Object.fromEntries(headerEntries.map(([k, v]) => [k, { schema: { type: 'string', example: v } }]))
-            : undefined,
-          content: hasBody ? { [contentType]: { schema: inferSchema(r.body), example: r.body } } : undefined,
-        }),
+      responses: responsesByStatus(e.responses, live),
+      'x-mock-hub': {
+        id: e.id,
+        version: e.version,
+        owner: e.owner,
+        updatedAt: e.updatedAt,
+        activeCase: live.id,
+        cases: e.responses.map((c) => ({ id: c.id, name: c.name, status: c.status })),
       },
-      'x-mock-hub': { id: e.id, version: e.version, owner: e.owner, updatedAt: e.updatedAt },
     });
     const key = toOpenApiPath(e.path);
     (paths[key] ??= {})[e.method.toLowerCase()] = operation;

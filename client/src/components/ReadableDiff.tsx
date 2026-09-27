@@ -98,6 +98,15 @@ export function ReadableDiff({ before, after }: { before?: EndpointContent; afte
   const [qb, qa] = entries((e) => queryEntries(e.request?.query));
   const queryToks = diffTokens(qb, qa);
 
+  // Response cases are matched by id: one block per case, untouched ones hidden on updates.
+  const caseIds = [...new Set([...(b?.responses ?? []).map((c) => c.id), ...(a?.responses ?? []).map((c) => c.id)])];
+  const cases = caseIds.map((id) => ({
+    id,
+    cb: b?.responses.find((c) => c.id === id),
+    ca: a?.responses.find((c) => c.id === id),
+  }));
+  const multiCase = caseIds.length > 1;
+
   return (
     <div className="readable-diff">
       <Row label="Request">
@@ -137,33 +146,45 @@ export function ReadableDiff({ before, after }: { before?: EndpointContent; afte
         </Row>
       )}
 
-      <Row label="Status">
-        <span className="mono">
-          <Toks toks={diffTokens(...entries((e) => one('s', e.response.status)))} sep=" " />
-          {show((e) => e.response.delayMs) && (
-            <>
-              <span className="tok-sep"> · delay </span>
-              <Toks toks={diffTokens(...entries((e) => one('d', e.response.delayMs ? `${e.response.delayMs} ms` : '0 ms')))} sep=" " />
-            </>
-          )}
-        </span>
-      </Row>
-      {show((e) => e.response.headers) && (
-        <Row label="Headers">
-          <span className="mono tok-lines">
-            <Toks toks={diffTokens(...entries((e) => responseHeaderEntries(e.response.headers)))} sep="" />
-          </span>
-        </Row>
-      )}
-      {a && show((e) => e.response.body) && (
-        <Row label="Body">
-          {isUpdate ? (
-            <JsonDiff before={b!.response.body} after={a.response.body} />
-          ) : (
-            <pre className="code">{pretty(a.response.body)}</pre>
-          )}
-        </Row>
-      )}
+      {cases.map(({ id, cb, ca }) => {
+        const cur = (ca ?? cb)!;
+        if (isUpdate && cb && ca && sameJson(cb, ca)) return null;
+        const headers = [cb && responseHeaderEntries(cb.headers), ca && responseHeaderEntries(ca.headers)] as const;
+        const bodyOne = (ca ?? cb)!.body;
+        return (
+          <Row key={id} label={multiCase ? cur.name : 'Response'}>
+            <div className="stack" style={{ gap: 6 }}>
+              <span className="mono">
+                <Toks toks={diffTokens(cb ? one('s', cb.status) : null, ca ? one('s', ca.status) : null)} sep=" " />
+                {!!(cb?.delayMs || ca?.delayMs) && (
+                  <>
+                    <span className="tok-sep"> · delay </span>
+                    <Toks
+                      toks={diffTokens(
+                        cb ? one('d', `${cb.delayMs ?? 0} ms`) : null,
+                        ca ? one('d', `${ca.delayMs ?? 0} ms`) : null,
+                      )}
+                      sep=" "
+                    />
+                  </>
+                )}
+                {isUpdate && !cb && <span className="badge badge-ok rd-case-flag">new case</span>}
+                {isUpdate && !ca && <span className="badge status-rejected rd-case-flag">case removed</span>}
+                {cur.description && <span className="muted small rd-case-flag">{cur.description}</span>}
+              </span>
+              {!!(headers[0]?.length || headers[1]?.length) && (
+                <span className="mono tok-lines">
+                  <Toks toks={diffTokens(headers[0] ?? null, headers[1] ?? null)} sep="" />
+                </span>
+              )}
+              {isUpdate && cb && ca
+                ? !sameJson(cb.body, ca.body) && <JsonDiff before={cb.body} after={ca.body} />
+                : bodyOne !== undefined &&
+                  bodyOne !== null && <pre className={`code${ca ? '' : ' code-del'}`}>{pretty(bodyOne)}</pre>}
+            </div>
+          </Row>
+        );
+      })}
 
       {show((e) => e.summary) && (
         <Row label="Summary">

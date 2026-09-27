@@ -1,0 +1,101 @@
+{
+  "title": "Checkout with its error cases",
+  "message": "One route per action, each with the answers the checkout screen has to handle. The first case is live; switch the others from the endpoint row when you build the error states.",
+  "kind": "publish",
+  "data": {
+    "endpoints": [
+      {
+        "method": "POST",
+        "path": "/api/checkout",
+        "summary": "Pay a basket",
+        "tags": ["checkout"],
+        "request": {
+          "headers": [{ "name": "Idempotency-Key", "example": "b8f1c2", "required": true }],
+          "bodyExample": { "basketId": "bsk_1042", "card": { "token": "tok_visa" } }
+        },
+        "responses": [
+          {
+            "name": "Paid",
+            "status": 201,
+            "body": {
+              "orderId": "ord_7781",
+              "status": "paid",
+              "total": { "amount": 8990, "currency": "EUR" },
+              "paidAt": "2026-09-27T10:12:00Z"
+            }
+          },
+          {
+            "name": "Card declined",
+            "status": 402,
+            "description": "The bank refused the card",
+            "body": { "error": "card_declined", "message": "Votre banque a refusé le paiement.", "retryable": true }
+          },
+          {
+            "name": "Basket changed",
+            "status": 409,
+            "description": "An item ran out while the user was paying",
+            "body": {
+              "error": "basket_changed",
+              "message": "Un article n'est plus disponible.",
+              "items": [{ "sku": "A-1", "available": 0 }]
+            }
+          },
+          {
+            "name": "Invalid data",
+            "status": 422,
+            "body": { "error": "validation_failed", "fields": { "card.token": "required" } }
+          },
+          {
+            "id": "slow",
+            "name": "Slow bank",
+            "status": 201,
+            "description": "For spinners and timeouts",
+            "delayMs": 6000,
+            "body": { "orderId": "ord_7781", "status": "paid", "total": { "amount": 8990, "currency": "EUR" } }
+          },
+          {
+            "name": "Gateway down",
+            "status": 503,
+            "headers": { "Retry-After": "30" },
+            "body": { "error": "payment_gateway_unavailable" }
+          }
+        ]
+      },
+      {
+        "method": "GET",
+        "path": "/api/orders/:id",
+        "summary": "Order detail",
+        "tags": ["checkout"],
+        "request": { "params": [{ "name": "id", "example": "ord_7781" }] },
+        "responses": [
+          {
+            "name": "Success",
+            "status": 200,
+            "body": {
+              "id": "ord_7781",
+              "status": "paid",
+              "createdAt": "2026-09-27T10:12:00Z",
+              "items": [
+                { "sku": "A-1", "name": "Clavier compact", "qty": 1, "price": 5990 },
+                { "sku": "B-7", "name": "Souris sans fil", "qty": 1, "price": 3000 }
+              ],
+              "total": { "amount": 8990, "currency": "EUR" }
+            }
+          },
+          { "name": "Not found", "status": 404, "body": { "error": "order_not_found" } },
+          { "name": "Forbidden", "status": 403, "description": "Order of another customer", "body": { "error": "forbidden" } }
+        ]
+      },
+      {
+        "method": "GET",
+        "path": "/api/checkout/config",
+        "summary": "Payment methods offered",
+        "tags": ["checkout"],
+        "response": {
+          "status": 200,
+          "body": { "methods": ["card", "paypal"], "currency": "EUR", "minAmount": 100 }
+        }
+      }
+    ]
+  }
+}

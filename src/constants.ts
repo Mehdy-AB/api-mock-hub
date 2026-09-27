@@ -9,3 +9,7 @@ export const MOCK_OPENAPI_PATH = '/_hub/openapi.json';
 export const MGMT_DOCS_PATH = '_hub/api-docs';
 /** Response header added to every mock response: "<endpointId>@v<version>". */
 export const MOCK_HEADER = 'x-mock-hub';
+/** Request header (and response header) naming the response case: one call, one case, without switching it for everyone. */
+export const MOCK_CASE_HEADER = 'x-mock-case';
+/** Same thing as a query param, for links and browser tabs. */
+export const MOCK_CASE_QUERY = '__case';

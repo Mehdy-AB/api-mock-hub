@@ -80,8 +80,9 @@ export function validateImport(raw: unknown): ValidationResult {
       return;
     }
     seen.set(key, label);
-    const res = r.value.response;
-    routes.push(`${label} -> ${res.status}${res.delayMs ? ` after ${res.delayMs} ms` : ''}`);
+    const [first, ...rest] = r.value.responses;
+    const extra = rest.length ? `  +${rest.length} case(s): ${rest.map((c) => `${c.id} ${c.status}`).join(', ')}` : '';
+    routes.push(`${label} -> ${first.status}${first.delayMs ? ` after ${first.delayMs} ms` : ''}${extra}`);
   });
   return { format: resolved, routes, errors, warnings };
 }

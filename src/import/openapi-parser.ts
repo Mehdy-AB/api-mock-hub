@@ -1,6 +1,6 @@
 import { isPlainObject } from '../common/json-utils';
 import { clean } from '../common/util';
-import { normalizePath } from '../endpoints/route-rules';
+import { defaultCaseName, MAX_RESPONSE_CASES, normalizePath } from '../endpoints/route-rules';
 
 type Json = Record<string, unknown>;
 
@@ -133,34 +133,43 @@ function paramExample(p: Json, r: RefResolver): unknown {
   return undefined;
 }
 
-function pickResponse(op: Json, r: RefResolver, warnings: string[], label: string): Json {
+/** Every documented status becomes a response case, 2xx first, so error states arrive with the import. */
+function pickResponses(op: Json, r: RefResolver, warnings: string[], label: string): Json[] {
   const responses = isPlainObject(op.responses) ? op.responses : {};
   const codes = Object.keys(responses);
-  const code =
-    codes.filter((c) => /^2\d\d$/.test(c)).sort()[0] ??
-    codes.find((c) => /^2xx$/i.test(c)) ??
-    codes.filter((c) => /^\d{3}$/.test(c)).sort()[0] ??
-    (codes.includes('default') ? 'default' : undefined);
-  if (!code) {
+  const exact = codes.filter((c) => /^\d{3}$/.test(c)).sort();
+  const ordered = [
+    ...exact.filter((c) => c.startsWith('2')),
+    ...exact.filter((c) => !c.startsWith('2')),
+    ...codes.filter((c) => /^\dxx$/i.test(c)),
+    ...codes.filter((c) => c.toLowerCase() === 'default'),
+  ];
+  if (!ordered.length) {
     warnings.push(`${label}: no responses defined, using 200 with an empty object`);
-    return { status: 200, body: {} };
+    return [{ name: 'Success', status: 200, body: {} }];
   }
-  const status = /^\d{3}$/.test(code) ? Number(code) : 200;
-  const res = r.deref(responses[code]);
-  let body: unknown;
-  let headers: Record<string, string> | undefined;
-  if (isPlainObject(res)) {
-    if (isPlainObject(res.content)) {
-      const [type, media] = pickMedia(res.content);
-      body = mediaExample(media, r);
-      if (type && !type.includes('json')) headers = { 'Content-Type': type };
-    } else if (isPlainObject(res.examples) && res.examples['application/json'] !== undefined) {
-      body = res.examples['application/json']; // Swagger 2
-    } else if (res.schema) {
-      body = sampleFromSchema(res.schema, r); // Swagger 2
+  if (ordered.length > MAX_RESPONSE_CASES) {
+    warnings.push(`${label}: kept the first ${MAX_RESPONSE_CASES} of ${ordered.length} documented responses`);
+  }
+  return ordered.slice(0, MAX_RESPONSE_CASES).map((code) => {
+    const status = /^\d{3}$/.test(code) ? Number(code) : /^\dxx$/i.test(code) ? Number(code[0]) * 100 : 200;
+    const res = r.deref(responses[code]);
+    let body: unknown;
+    let headers: Record<string, string> | undefined;
+    if (isPlainObject(res)) {
+      if (isPlainObject(res.content)) {
+        const [type, media] = pickMedia(res.content);
+        body = mediaExample(media, r);
+        if (type && !type.includes('json')) headers = { 'Content-Type': type };
+      } else if (isPlainObject(res.examples) && res.examples['application/json'] !== undefined) {
+        body = res.examples['application/json']; // Swagger 2
+      } else if (res.schema) {
+        body = sampleFromSchema(res.schema, r); // Swagger 2
+      }
     }
-  }
-  return clean({ status, headers, body });
+    const described = isPlainObject(res) && typeof res.description === 'string' ? res.description.trim() : '';
+    return clean({ name: described.slice(0, 60) || defaultCaseName(status), status, headers, body });
+  });
 }
 
 function requestBodyExample(op: Json, params: Json[], r: RefResolver): unknown {
@@ -173,7 +182,7 @@ function requestBodyExample(op: Json, params: Json[], r: RefResolver): unknown {
 
 /**
  * Converts an OpenAPI 3 or Swagger 2 document into raw endpoint objects.
- * The first 2xx response becomes the mock; its example (or a schema-derived sample) is the static body.
+ * Each documented response becomes a case; its example (or a schema-derived sample) is the static body.
  */
 export function parseOpenApi(doc: unknown, opts: { basePath?: string } = {}): ParseResult {
   if (!isPlainObject(doc) || !isPlainObject(doc.paths)) {
@@ -232,7 +241,7 @@ export function parseOpenApi(doc: unknown, opts: { basePath?: string } = {}): Pa
           description: typeof op.description === 'string' ? op.description : undefined,
           tags: Array.isArray(op.tags) ? op.tags.filter((t) => typeof t === 'string') : undefined,
           request: Object.keys(request).length ? request : undefined,
-          response: pickResponse(op, r, warnings, label),
+          responses: pickResponses(op, r, warnings, label),
         }),
       );
     }

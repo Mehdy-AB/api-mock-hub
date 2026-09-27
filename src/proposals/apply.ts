@@ -76,6 +76,8 @@ export function applyChanges(
         createdAt: cur.createdAt,
         updatedAt: now,
       };
+      // The live case selection survives an edit, unless that case is gone.
+      if (cur.active && e.responses.some((r) => r.id === cur.active!.caseId)) e.active = cur.active;
       byId.set(e.id, e);
       frozen.push({ ...c, resultVersion: e.version });
     } else {

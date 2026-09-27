@@ -5,8 +5,35 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import { APP_CONFIG, AppConfig } from '../config/app-config';
 import { Mutex } from '../common/mutex';
+import { defaultCaseName } from '../endpoints/route-rules';
 import { readJson, writeJsonAtomic } from './json-file';
-import { Commit, Db, DEFAULT_SETTINGS, Endpoint, Proposal, Settings, User } from './models';
+import { Commit, Db, DEFAULT_SETTINGS, Endpoint, MockResponse, Proposal, Settings, User } from './models';
+
+type StoredEndpoint = Endpoint & { response?: MockResponse };
+
+/**
+ * Endpoints saved before response cases existed carry a single `response`.
+ * Returns true when something was rewritten, so the file is saved once on boot.
+ */
+function migrateResponseCases(endpoints: StoredEndpoint[]): boolean {
+  let changed = false;
+  for (const e of endpoints) {
+    if (!Array.isArray(e.responses) || !e.responses.length) {
+      const single: MockResponse = e.response ?? { status: 200, body: {} };
+      e.responses = [{ id: 'success', name: defaultCaseName(single.status), ...single }];
+      changed = true;
+    }
+    if (e.response !== undefined) {
+      delete e.response;
+      changed = true;
+    }
+    if (e.active && !e.responses.some((c) => c.id === e.active!.caseId)) {
+      delete e.active;
+      changed = true;
+    }
+  }
+  return changed;
+}
 
 export type CollectionName = keyof Db;
 export const ALL_COLLECTIONS: CollectionName[] = ['endpoints', 'proposals', 'commits', 'users', 'settings'];
@@ -103,6 +130,10 @@ export class StoreService implements OnModuleInit {
     this.secret = this.config.jwtSecret ?? (await this.loadOrCreateSecret());
     this.revision++;
     this.loaded = true;
+    if (migrateResponseCases(endpoints)) {
+      await this.write(['endpoints'], () => undefined);
+      this.logger.log('Upgraded stored endpoints to response cases');
+    }
     if (users.length === 0) {
       await this.seedAdmin();
     } else if (this.config.adminPassword) {

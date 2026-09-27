@@ -47,6 +47,11 @@ export const hubStore = {
       });
     return inflight;
   },
+  /** Replace one endpoint in place, for changes that need no full reload (the live-case switch). */
+  patchEndpoint(e: Endpoint) {
+    state = { ...state, endpoints: state.endpoints.map((x) => (x.id === e.id ? e : x)) };
+    emit();
+  },
   reset() {
     state = initial;
     emit();

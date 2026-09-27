@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { HttpMethod, METHODS } from '../types';
 import { paramNames, parseJsonText, pretty, uid } from '../util';
 import { Field } from './Common';
-import { Errors, FormState, normalizePath, ParamRow } from './form-model';
+import { blankCase, CaseErrors, CaseForm, defaultCaseName, Errors, FormState, normalizePath, ParamRow } from './form-model';
 import { JsonEditor } from './JsonEditor';
 
 function ParamRows({
@@ -75,17 +75,145 @@ function ParamRows({
   );
 }
 
+/** The fields of one response case: what this route answers when this case is the live one. */
+function CaseEditor({
+  c,
+  errors,
+  onChange,
+  onRemove,
+  statusList,
+}: {
+  c: CaseForm;
+  errors: CaseErrors;
+  onChange: (patch: Partial<CaseForm>) => void;
+  onRemove?: () => void;
+  statusList: string;
+}) {
+  const format = () => {
+    const p = parseJsonText(c.body);
+    if (p.ok && p.value !== undefined) onChange({ body: pretty(p.value) });
+  };
+  return (
+    <div className="stack case-editor">
+      <div className="form-row-3">
+        <Field label="Case name" error={errors.name} hint="Shown in the switch">
+          <input type="text" value={c.name} placeholder="Not found" onChange={(e) => onChange({ name: e.target.value })} />
+        </Field>
+        <Field label="Status" error={errors.status}>
+          <input
+            type="number"
+            min={100}
+            max={599}
+            list={statusList}
+            value={c.status}
+            onChange={(e) => onChange({ status: e.target.value })}
+          />
+        </Field>
+        <Field label="Delay (ms)" error={errors.delayMs}>
+          <input
+            type="number"
+            min={0}
+            max={60000}
+            placeholder="0"
+            value={c.delayMs}
+            onChange={(e) => onChange({ delayMs: e.target.value })}
+          />
+        </Field>
+      </div>
+
+      <div className="stack" style={{ gap: 6 }}>
+        <span className="label">Response headers</span>
+        {c.headers.map((h, i) => (
+          <div key={h.id} className="header-row">
+            <input
+              type="text"
+              className="mono"
+              placeholder="X-Total-Count"
+              aria-label="Header name"
+              value={h.name}
+              onChange={(e) => onChange({ headers: c.headers.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)) })}
+            />
+            <input
+              type="text"
+              className="mono"
+              placeholder="value"
+              aria-label="Header value"
+              value={h.value}
+              onChange={(e) => onChange({ headers: c.headers.map((x, j) => (j === i ? { ...x, value: e.target.value } : x)) })}
+            />
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              aria-label="Remove header"
+              onClick={() => onChange({ headers: c.headers.filter((_, j) => j !== i) })}
+            >
+              ✕
+            </button>
+          </div>
+        ))}
+        {errors.headers && <span className="error-text">{errors.headers}</span>}
+        <div>
+          <button
+            type="button"
+            className="btn btn-sm"
+            onClick={() => onChange({ headers: [...c.headers, { id: uid(), name: '', value: '' }] })}
+          >
+            Add header
+          </button>
+        </div>
+      </div>
+
+      <div className="stack" style={{ gap: 6 }}>
+        <div className="row">
+          <span className="label">Response body (JSON)</span>
+          <span className="spacer" />
+          <button type="button" className="btn btn-sm" onClick={format}>
+            Format
+          </button>
+        </div>
+        <JsonEditor value={c.body} onChange={(v) => onChange({ body: v })} invalid={!!errors.body} minHeight="160px" />
+        {errors.body ? (
+          <span className="error-text">{errors.body}</span>
+        ) : (
+          <span className="muted small">Returned exactly as written. Leave empty for no body.</span>
+        )}
+      </div>
+
+      <div className="row">
+        <input
+          type="text"
+          placeholder="When does this case apply? (optional note)"
+          aria-label="Case description"
+          value={c.description}
+          onChange={(e) => onChange({ description: e.target.value })}
+        />
+        {onRemove && (
+          <button type="button" className="btn btn-sm btn-danger" onClick={onRemove}>
+            Delete case
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /** Every editable field of an endpoint, controlled by the parent. */
 export function EndpointFields({
   form: f,
   onChange,
   errors,
   idPrefix,
+  activeCaseId,
+  onActivate,
 }: {
   form: FormState;
   onChange: (next: FormState) => void;
   errors: Errors;
   idPrefix: string;
+  /** Case served right now, for the live marker. */
+  activeCaseId?: string;
+  /** Switch the live case. Instant, so it is not part of the save. */
+  onActivate?: (caseId: string) => void;
 }) {
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) => onChange({ ...f, [key]: value });
   const names = paramNames(normalizePath(f.path));
@@ -94,10 +222,27 @@ export function EndpointFields({
     () => !!(f.description || f.query.length || f.reqHeaders.length || Object.keys(f.pathParams).length || f.bodyExample.trim()),
   );
   const statusList = `status-codes-${idPrefix}`;
+  const current = f.cases.find((c) => c.key === f.caseKey) ?? f.cases[0];
 
-  const format = (key: 'body' | 'bodyExample') => {
-    const p = parseJsonText(f[key]);
-    if (p.ok && p.value !== undefined) set(key, pretty(p.value));
+  const patchCase = (key: string, patch: Partial<CaseForm>) =>
+    onChange({ ...f, cases: f.cases.map((c) => (c.key === key ? { ...c, ...patch } : c)) });
+  const addCase = () => {
+    // Pick a status and a name that are still free, so the new case is valid straight away.
+    const usedStatus = new Set(f.cases.map((x) => x.status.trim()));
+    const usedNames = new Set(f.cases.map((x) => x.name.trim().toLowerCase()));
+    const status = [404, 500, 400, 409, 422, 401, 403, 503].find((x) => !usedStatus.has(String(x))) ?? 500;
+    const c = blankCase(status);
+    for (let n = 2; usedNames.has(c.name.toLowerCase()); n++) c.name = `${defaultCaseName(status)} ${n}`;
+    onChange({ ...f, cases: [...f.cases, c], caseKey: c.key });
+  };
+  const removeCase = (key: string) => {
+    const rest = f.cases.filter((c) => c.key !== key);
+    onChange({ ...f, cases: rest, caseKey: rest[0].key });
+  };
+
+  const formatReqBody = () => {
+    const p = parseJsonText(f.bodyExample);
+    if (p.ok && p.value !== undefined) set('bodyExample', pretty(p.value));
   };
 
   return (
@@ -123,80 +268,56 @@ export function EndpointFields({
         </Field>
       </div>
 
-      <div className="form-row-3">
-        <Field label="Status" error={errors.status}>
-          <input type="number" min={100} max={599} list={statusList} value={f.status} onChange={(e) => set('status', e.target.value)} />
-        </Field>
-        <Field label="Delay (ms)" error={errors.delayMs}>
-          <input
-            type="number"
-            min={0}
-            max={60000}
-            placeholder="0"
-            value={f.delayMs}
-            onChange={(e) => set('delayMs', e.target.value)}
-          />
-        </Field>
+      <div className="case-tabs" role="tablist" aria-label="Response cases">
+        {f.cases.map((c) => {
+          const live = !!c.id && c.id === activeCaseId;
+          const bad = !!errors.cases?.[c.key];
+          return (
+            <button
+              key={c.key}
+              type="button"
+              role="tab"
+              aria-selected={c.key === current?.key}
+              className={`case-tab${c.key === current?.key ? ' active' : ''}${live ? ' live' : ''}${bad ? ' bad' : ''}`}
+              onClick={() => set('caseKey', c.key)}
+              title={live ? 'This is what the route returns right now' : c.description || undefined}
+            >
+              <span className={`http-status http-${c.status[0] ?? '2'}`}>{c.status || '?'}</span>
+              {c.name || 'Unnamed case'}
+              {live && <span className="live-dot" aria-label="returned now" />}
+            </button>
+          );
+        })}
+        <button type="button" className="btn btn-sm case-add" onClick={addCase}>
+          + Add case
+        </button>
       </div>
+      {errors.caseList && <span className="error-text">{errors.caseList}</span>}
       <datalist id={statusList}>
         {[200, 201, 202, 204, 400, 401, 403, 404, 409, 422, 500, 503].map((s) => (
           <option key={s} value={s} />
         ))}
       </datalist>
 
-      <div className="stack" style={{ gap: 6 }}>
-        <span className="label">Response headers</span>
-        {f.headers.map((h, i) => (
-          <div key={h.id} className="header-row">
-            <input
-              type="text"
-              className="mono"
-              placeholder="X-Total-Count"
-              aria-label="Header name"
-              value={h.name}
-              onChange={(e) => set('headers', f.headers.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))}
-            />
-            <input
-              type="text"
-              className="mono"
-              placeholder="value"
-              aria-label="Header value"
-              value={h.value}
-              onChange={(e) => set('headers', f.headers.map((x, j) => (j === i ? { ...x, value: e.target.value } : x)))}
-            />
-            <button
-              type="button"
-              className="btn btn-ghost btn-sm"
-              aria-label="Remove header"
-              onClick={() => set('headers', f.headers.filter((_, j) => j !== i))}
-            >
-              ✕
-            </button>
-          </div>
-        ))}
-        {errors.headers && <span className="error-text">{errors.headers}</span>}
-        <div>
-          <button type="button" className="btn btn-sm" onClick={() => set('headers', [...f.headers, { id: uid(), name: '', value: '' }])}>
-            Add header
-          </button>
-        </div>
-      </div>
-
-      <div className="stack" style={{ gap: 6 }}>
-        <div className="row">
-          <span className="label">Response body (JSON)</span>
-          <span className="spacer" />
-          <button type="button" className="btn btn-sm" onClick={() => format('body')}>
-            Format
-          </button>
-        </div>
-        <JsonEditor value={f.body} onChange={(v) => set('body', v)} invalid={!!errors.body} minHeight="160px" />
-        {errors.body ? (
-          <span className="error-text">{errors.body}</span>
-        ) : (
-          <span className="muted small">Returned exactly as written. Leave empty for no body.</span>
-        )}
-      </div>
+      {current && (
+        <>
+          {onActivate && current.id && current.id !== activeCaseId && (
+            <div className="row">
+              <button type="button" className="btn btn-sm btn-ok" onClick={() => onActivate(current.id)}>
+                Return this case now
+              </button>
+              <span className="muted small">Applies at once for everyone. No review.</span>
+            </div>
+          )}
+          <CaseEditor
+            c={current}
+            errors={errors.cases?.[current.key] ?? {}}
+            statusList={statusList}
+            onChange={(patch) => patchCase(current.key, patch)}
+            onRemove={f.cases.length > 1 ? () => removeCase(current.key) : undefined}
+          />
+        </>
+      )}
 
       <details open={moreOpen}>
         <summary>
@@ -248,7 +369,7 @@ export function EndpointFields({
               <div className="row">
                 <span className="label">Request body example (JSON)</span>
                 <span className="spacer" />
-                <button type="button" className="btn btn-sm" onClick={() => format('bodyExample')}>
+                <button type="button" className="btn btn-sm" onClick={formatReqBody}>
                   Format
                 </button>
               </div>

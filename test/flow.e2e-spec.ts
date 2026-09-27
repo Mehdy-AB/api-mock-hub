@@ -122,7 +122,7 @@ describe('API Mock Hub end to end', () => {
       .send({ title: 'B', changes: [{ type: 'update', ref: 'GET /users/:id', endpoint: userEndpoint({ id: 1, name: 'B', email: 'b@x.io' }) }] })
       .expect(201);
     expect(b.body.kind).toBe('request');
-    expect(b.body.changes[0].diff.map((d: { path: string }) => d.path)).toEqual(['response.body.email', 'response.body.name']);
+    expect(b.body.changes[0].diff.map((d: { path: string }) => d.path)).toEqual(['responses[0].body.email', 'responses[0].body.name']);
 
     await http.post(`/_hub/api/proposals/${a.body.id}/reviews`).set(as('fay')).send({ decision: 'approve' }).expect(200);
     expect((await http.get('/users/1')).body.name).toBe('A');

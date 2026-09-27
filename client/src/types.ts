@@ -25,6 +25,19 @@ export interface MockResponse {
   delayMs?: number;
 }
 
+/** One answer an endpoint can give. Editing the list is reviewed; picking the live one is not. */
+export interface ResponseCase extends MockResponse {
+  id: string;
+  name: string;
+  description?: string;
+}
+
+export interface ActiveCase {
+  caseId: string;
+  by: string;
+  at: string;
+}
+
 export interface EndpointContent {
   method: HttpMethod;
   path: string;
@@ -32,7 +45,8 @@ export interface EndpointContent {
   description?: string;
   tags: string[];
   request?: RequestDoc;
-  response: MockResponse;
+  /** At least one case; the first answers when nothing is selected. */
+  responses: ResponseCase[];
 }
 
 export interface Endpoint extends EndpointContent {
@@ -41,6 +55,8 @@ export interface Endpoint extends EndpointContent {
   version: number;
   createdAt: string;
   updatedAt: string;
+  /** Which case is live. Not versioned: switching it is instant and leaves no commit. */
+  active?: ActiveCase;
 }
 
 export type ChangeType = 'add' | 'update' | 'delete';

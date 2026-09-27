@@ -9,6 +9,7 @@ import {
   MockResponse,
   ParamDoc,
   RequestDoc,
+  ResponseCase,
 } from '../storage/models';
 
 const NAME = '[A-Za-z_$][\\w$]*';
@@ -78,8 +79,57 @@ export function compareSpecificity(a: string, b: string): number {
   return 0;
 }
 
+export const MAX_RESPONSE_CASES = 20;
+const CASE_ID_RE = /^[a-z0-9][a-z0-9_-]*$/;
+
+const STATUS_NAMES: Record<number, string> = {
+  200: 'Success',
+  201: 'Created',
+  202: 'Accepted',
+  204: 'No content',
+  400: 'Bad request',
+  401: 'Unauthorized',
+  403: 'Forbidden',
+  404: 'Not found',
+  409: 'Conflict',
+  422: 'Invalid data',
+  429: 'Too many requests',
+  500: 'Server error',
+  503: 'Unavailable',
+};
+
+export function defaultCaseName(status: number): string {
+  return STATUS_NAMES[status] ?? (status < 400 ? `Status ${status}` : `Error ${status}`);
+}
+
+/** "Not found" -> "not-found", made unique against `taken`. */
+export function caseIdFrom(name: string, taken: Set<string> = new Set()): string {
+  const base =
+    name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 40) || 'case';
+  let id = base;
+  for (let n = 2; taken.has(id); n++) id = `${base}-${n}`;
+  return id;
+}
+
+/** Looks a case up by id, then by name. Used by the switch and the x-mock-case header. */
+export function findCase(cases: ResponseCase[], ref: string): ResponseCase | undefined {
+  const needle = ref.trim().toLowerCase();
+  if (!needle) return undefined;
+  return cases.find((c) => c.id === needle) ?? cases.find((c) => c.name.toLowerCase() === needle);
+}
+
+/** The case this endpoint serves right now: the selected one, or the first. */
+export function activeCase(e: Endpoint): ResponseCase {
+  const id = e.active?.caseId;
+  return (id ? e.responses.find((c) => c.id === id) : undefined) ?? e.responses[0];
+}
+
 export function contentOf(e: EndpointContent | Endpoint): EndpointContent {
-  const c: EndpointContent = { method: e.method, path: e.path, tags: e.tags, response: e.response };
+  const c: EndpointContent = { method: e.method, path: e.path, tags: e.tags, responses: e.responses };
   if (e.summary !== undefined) c.summary = e.summary;
   if (e.description !== undefined) c.description = e.description;
   if (e.request !== undefined) c.request = e.request;
@@ -133,10 +183,10 @@ export function sanitizeEndpoint(input: unknown, at = 'endpoint'): { value?: End
   }
 
   const request = sanitizeRequest(input.request, err);
-  const response = sanitizeResponse(input.response, err);
-  if (errors.length || !response) return { errors };
+  const responses = sanitizeCases(input, err);
+  if (errors.length || !responses) return { errors };
 
-  const value: EndpointContent = { method: method as HttpMethod, path, tags, response };
+  const value: EndpointContent = { method: method as HttpMethod, path, tags, responses };
   if (summary) value.summary = summary;
   if (description) value.description = description;
   if (request) value.request = request;
@@ -181,31 +231,93 @@ function sanitizeRequest(v: unknown, err: (m: string) => void): RequestDoc | und
   return Object.keys(r).length ? r : undefined;
 }
 
-function sanitizeResponse(v: unknown, err: (m: string) => void): MockResponse | undefined {
+/**
+ * Response cases, from either `responses: [...]` (many cases) or `response: {...}` (one).
+ * Ids are filled in from the names, so import files only need to name their cases.
+ */
+function sanitizeCases(input: Record<string, unknown>, err: (m: string) => void): ResponseCase[] | undefined {
+  const hasList = input.responses !== undefined && input.responses !== null;
+  const hasSingle = input.response !== undefined && input.response !== null;
+  if (hasList && hasSingle) {
+    err('use either "responses" (a list of cases) or "response" (a single one), not both');
+    return undefined;
+  }
+  if (!hasList) {
+    const single = sanitizeResponse(input.response, err, 'response');
+    return single ? [namedCase(input.response as Record<string, unknown>, single, new Set(), err, 'response')] : undefined;
+  }
+  if (!Array.isArray(input.responses)) {
+    err('responses must be an array of response cases');
+    return undefined;
+  }
+  if (!input.responses.length) {
+    err('responses needs at least one case');
+    return undefined;
+  }
+  if (input.responses.length > MAX_RESPONSE_CASES) {
+    err(`responses can hold at most ${MAX_RESPONSE_CASES} cases`);
+    return undefined;
+  }
+  const out: ResponseCase[] = [];
+  const taken = new Set<string>();
+  input.responses.forEach((raw, i) => {
+    const at = `responses[${i}]`;
+    const base = sanitizeResponse(raw, err, at);
+    if (!base) return;
+    const c = namedCase(raw as Record<string, unknown>, base, taken, err, at);
+    if (c) out.push(c);
+  });
+  return out.length === input.responses.length ? out : undefined;
+}
+
+function namedCase(
+  raw: Record<string, unknown>,
+  base: MockResponse,
+  taken: Set<string>,
+  err: (m: string) => void,
+  at: string,
+): ResponseCase {
+  let id = typeof raw.id === 'string' ? raw.id.trim().toLowerCase() : '';
+  if (id && (!CASE_ID_RE.test(id) || id.length > 40)) {
+    err(`${at}.id must be up to 40 characters of lowercase letters, digits, "-" or "_"`);
+    id = '';
+  }
+  const name = (typeof raw.name === 'string' && raw.name.trim()) || (id ? id.replace(/[-_]/g, ' ') : defaultCaseName(base.status));
+  if (!id) id = caseIdFrom(name, taken);
+  if (taken.has(id)) {
+    err(`${at}.id "${id}" is used by another case`);
+  }
+  taken.add(id);
+  const c: ResponseCase = { id, name, ...base };
+  if (typeof raw.description === 'string' && raw.description.trim()) c.description = raw.description.trim();
+  return c;
+}
+
+function sanitizeResponse(v: unknown, err: (m: string) => void, at: string): MockResponse | undefined {
   if (v === undefined || v === null) {
-    err('response is required, e.g. { "status": 200, "body": {} }');
+    err(`${at} is required, e.g. { "status": 200, "body": {} }`);
     return undefined;
   }
   if (!isPlainObject(v)) {
-    err('response must be an object');
+    err(`${at} must be an object`);
     return undefined;
   }
   const status = v.status === undefined ? 200 : v.status;
   // Keep checking the other fields after a bad status, so one run reports every problem.
   if (!Number.isInteger(status) || (status as number) < 100 || (status as number) > 599) {
-    err('response.status must be an integer between 100 and 599');
+    err(`${at}.status must be an integer between 100 and 599`);
   }
   const r: MockResponse = { status: status as number };
   if (v.headers !== undefined && v.headers !== null) {
     if (!isPlainObject(v.headers) || Object.values(v.headers).some((h) => typeof h !== 'string')) {
-      err('response.headers must be an object of string values');
+      err(`${at}.headers must be an object of string values`);
     } else if (Object.keys(v.headers).length) {
       r.headers = v.headers as Record<string, string>;
     }
   }
   if (v.delayMs !== undefined && v.delayMs !== null) {
     if (!Number.isInteger(v.delayMs) || (v.delayMs as number) < 0 || (v.delayMs as number) > 60000) {
-      err('response.delayMs must be an integer between 0 and 60000');
+      err(`${at}.delayMs must be an integer between 0 and 60000`);
     } else if (v.delayMs) {
       r.delayMs = v.delayMs as number;
     }

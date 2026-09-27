@@ -1,7 +1,7 @@
 # API Mock Hub
 
 A self-hosted mock API that frontend and backend teams edit together.
-Define an endpoint with a static response, and it is callable right away at `http://<host>:<port>/<path>` and documented in Swagger.
+Define an endpoint with one or more static responses, and it is callable right away at `http://<host>:<port>/<path>` and documented in Swagger.
 Every change is recorded as a commit or a reviewed proposal, so nobody waits for anyone and nothing changes silently.
 
 - **Backend** publishes the contract for endpoints it is still building. Frontend codes against it the same day.
@@ -13,11 +13,12 @@ Every change is recorded as a commit or a reviewed proposal, so nobody waits for
 
 - **Swagger-style workspace.** One page lists every endpoint. Open a row and edit method, path, status, headers, body, delay and request docs in place, next to a live "Try it" panel.
 - **Save or propose.** Save applies your edits at once as a commit. Propose sends them for review; nothing goes live until someone approves.
+- **Several responses per endpoint.** A route holds a success case and as many error cases as you need (`404`, `409`, a slow one…). A picker on the row chooses which one it answers with **right now**: it applies instantly, with no proposal, no approval and no commit, so testing an error state is one click. Adding or editing the cases themselves stays a normal reviewed change.
 - **Review on the same page.** Open proposals show every edit as a readable diff (`GET /users?page=1`, old values in red, new in green), a discussion thread, and Approve, Request changes, Reject and Withdraw buttons. Authors edit a proposal in place.
 - **History you can undo.** Every commit is listed in the side panel with its diff. Any teammate can discard a commit, which undoes it for everyone as a new commit.
 - **Real backend tracking.** The backend team marks each commit as done or not done in the real backend, with a note such as a PR link. History filters by that status, and each endpoint shows whether its latest change is in the real backend yet.
 - **Safe concurrent editing.** Endpoints are versioned. If someone saves the same endpoint while you edit, you choose to keep your edits or take theirs.
-- **Bulk changes.** Tick endpoints to set a delay or status, add or remove a tag, or delete them together.
+- **Bulk changes.** Tick endpoints to switch them all to the same case (say, every route into its error case), set a delay or status, add or remove a tag, or delete them together.
 - **Import and export.** Import hub JSON or a whole OpenAPI 3 / Swagger 2 document; export the live set as hub JSON or OpenAPI.
 - **Real mock server.** Express-style paths (`/users/:id`, `/files/*rest`), most specific route wins, custom headers, simulated latency, CORS for any origin, optional API key.
 - **Simple to host.** One Node.js process or Docker container. Data is plain JSON files with atomic writes.
@@ -93,11 +94,12 @@ For hot reload on the UI, keep the server running and start `npm run dev:ui`, th
 Everything happens on the API page.
 
 1. **Edit.** Click a row to open it and change any field. "+ New endpoint" adds a row; each row also has Duplicate and Delete. Tick several rows for bulk changes.
-2. **Save or Propose.** As soon as something differs from the live version, a bar appears at the bottom with an optional message, **Cancel**, **Propose** and **Save**. Edits across several endpoints go into one commit or proposal.
-3. **Review.** Open proposals appear at the top of the page, with their edits, discussion and review buttons. Proposals waiting for you open automatically, and the header shows how many there are.
-4. **History.** The side panel lists commits. Open one to see what changed, and discard it if needed. When an endpoint is selected, the panel shows only that endpoint's proposals and history.
-5. **Real backend.** Each commit shows "✓ in backend" or "not in backend". Backend users and admins open a commit and click **Mark done in backend**, optionally with a note. Filter History by "Not in backend" to see what the real backend still has to build.
-6. **Import.** The Import button opens a popup: paste or upload hub JSON or an OpenAPI file, and the result appears right there.
+2. **Choose what it returns.** When a row has more than one case, the **returns** picker in its header switches the live one for everybody, the moment you pick it: no message, no review, no history. Inside the row, the case tabs (`200 Success`, `404 Not found`…) hold each case; the green dot marks the live one, and "Return this case now" switches to the open one. **+ Add case**, renaming and editing a case are ordinary edits, so they go through the save bar below.
+3. **Save or Propose.** As soon as something differs from the live version, a bar appears at the bottom with an optional message, **Cancel**, **Propose** and **Save**. Edits across several endpoints go into one commit or proposal.
+4. **Review.** Open proposals appear at the top of the page, with their edits, discussion and review buttons. Proposals waiting for you open automatically, and the header shows how many there are.
+5. **History.** The side panel lists commits. Open one to see what changed, and discard it if needed. When an endpoint is selected, the panel shows only that endpoint's proposals and history.
+6. **Real backend.** Each commit shows "✓ in backend" or "not in backend". Backend users and admins open a commit and click **Mark done in backend**, optionally with a note. Filter History by "Not in backend" to see what the real backend still has to build.
+7. **Import.** The Import button opens a popup: paste or upload hub JSON or an OpenAPI file, and the result appears right there.
 
 A mock `404` response includes a `create` link that opens a new endpoint row with the method and path filled in.
 
@@ -164,6 +166,39 @@ curl -i $HUB/users/42
 # {"id":1,"name":"Sara"}
 ```
 
+**Several response cases.** Use `responses` instead of `response`. The first case answers until someone switches it; ids are derived from the names when left out.
+
+```bash
+curl -s $HUB/_hub/api/commits -H "authorization: Bearer $TOKEN" -H 'content-type: application/json' -d '{
+  "title": "User detail with an error case",
+  "changes": [{
+    "type": "update", "ref": "GET /users/:id",
+    "endpoint": {
+      "method": "GET", "path": "/users/:id", "tags": ["users"],
+      "responses": [
+        { "name": "Success", "status": 200, "body": { "id": 1, "name": "Sara" } },
+        { "name": "Not found", "status": 404, "body": { "error": "user_not_found" } },
+        { "id": "slow", "name": "Slow", "status": 200, "delayMs": 3000, "body": { "id": 1, "name": "Sara" } }
+      ]
+    }
+  }]
+}'
+```
+
+**Switch what a route returns** — instant, any role, no review and no commit. The endpoint version does not change.
+
+```bash
+# One endpoint, by case id or case name
+curl -s -X PUT $HUB/_hub/api/endpoints/<endpointId>/active-case   -H "authorization: Bearer $TOKEN" -H 'content-type: application/json' -d '{"case":"not-found"}'
+
+# Many at once; endpoints without that case come back under "skipped"
+curl -s $HUB/_hub/api/endpoints/active-case -H "authorization: Bearer $TOKEN" -H 'content-type: application/json'   -d '{"endpointIds":["<id1>","<id2>"],"case":"Not found"}'
+
+curl -i $HUB/users/42            # 404, x-mock-case: not-found
+curl -i $HUB/users/42 -H 'x-mock-case: success'   # 200, just for this call
+curl -i "$HUB/users/42?__case=slow"               # same, as a query param
+```
+
 **Propose** with the same body at `POST /_hub/api/proposals`. Change types:
 
 - `add` needs `endpoint`.
@@ -181,6 +216,8 @@ curl -i $HUB/users/42
 | `GET /commits` / `GET /commits/{id}` | History, and one commit with diffs |
 | `POST /commits/{id}/discard` | Undo a commit for everyone, as a new commit |
 | `POST /commits/{id}/backend` | Backend or admin: `{"done": true, "note": "PR #42"}` marks whether the real backend implements it |
+| `PUT /endpoints/{id}/active-case` | Switch the live response case. Not an edit: no proposal, no commit, no version bump. |
+| `POST /endpoints/active-case` | Same for a list of endpoints, by case id or name |
 
 **Conflicts.** Every endpoint has a version. If two changes edit the same endpoint, the first one applied wins.
 The other is marked `conflict`, and its author rebases or edits it. A commit can't be discarded while a later commit changed the same endpoint; discard the later one first.
@@ -190,7 +227,9 @@ The other is marked `conflict`, and its author rebases or edits it. A commit can
 `POST /_hub/api/import` turns a file into one proposal. New routes become adds, changed routes become updates, identical routes are skipped, and nothing is deleted. It accepts:
 
 - a hub export `{ "endpoints": [ … ] }`, a plain array of endpoints, or one endpoint;
-- a whole OpenAPI 3 or Swagger 2 document. The first 2xx response becomes the mock. Its example is used as the body, or a sample is generated from the schema.
+- a whole OpenAPI 3 or Swagger 2 document. **Every documented status becomes a response case** (2xx first, and the first one is served); each example is used as the body, or a sample is generated from the schema.
+
+An endpoint carries either `responses` (a list of cases) or `response` (a single one), never both. Older files with `response` keep importing, and stored endpoints are upgraded to a one-case list on first start.
 
 ```bash
 curl -s $HUB/_hub/api/import -H "authorization: Bearer $TOKEN" -H 'content-type: application/json' \
@@ -233,6 +272,9 @@ A proposal's `kind` is `publish` for a backend contract or `request` for a front
 - Paths that differ only by parameter name or letter case count as the same route.
 - `HEAD` falls back to the `GET` mock. `OPTIONS` is reserved for CORS, which allows every origin.
 - The response sends `status`, `headers` and `body`, with an optional `delayMs` of up to 60 seconds. A `null` or missing body sends an empty response.
+- An endpoint answers with its selected case, or the first one when nothing is selected. Every response carries `x-mock-case: <case id>`.
+- A single call can ask for another case with the `x-mock-case` header or a `?__case=` query param, without changing what everyone else gets. An unknown case name answers `400` and lists the available cases.
+- Up to 20 cases per endpoint.
 - Unknown routes return `404` with a hint.
 
 ## Project layout

@@ -166,7 +166,12 @@ export function ImportForm({ onClose }: { onClose: () => void }) {
         spellCheck={false}
         aria-label="Import JSON"
         autoFocus
-        placeholder={'{ "endpoints": [ { "method": "GET", "path": "/users", "response": { "status": 200, "body": [] } } ] }\n\nor a whole OpenAPI 3 / Swagger 2 document'}
+        placeholder={
+          '{ "endpoints": [ { "method": "GET", "path": "/users", "responses": [\n' +
+          '  { "name": "Success", "status": 200, "body": [] },\n' +
+          '  { "name": "Not found", "status": 404, "body": { "error": "none" } }\n' +
+          '] } ] }\n\nor "response": { … } for a single case, or a whole OpenAPI 3 / Swagger 2 document'
+        }
         value={text}
         onChange={(e) => setText(e.target.value)}
       />

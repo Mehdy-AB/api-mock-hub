@@ -49,7 +49,8 @@ describe('parseOpenApi', () => {
     expect(endpoints).toHaveLength(2);
     const get = endpoints.find((e) => e.method === 'GET')!;
     expect(get.path).toBe('/v1/users/:user_id');
-    expect(get.response).toEqual({
+    expect((get.responses as unknown[])[0]).toEqual({
+      name: 'ok',
       status: 200,
       // User references itself through "manager"; the cycle guard stops at the first repeat.
       body: { id: 0, email: 'user@example.com', manager: null, roles: ['admin'] },
@@ -57,7 +58,7 @@ describe('parseOpenApi', () => {
     expect(get.request).toMatchObject({ params: [{ name: 'user_id', example: 7 }], query: [{ name: 'expand', example: 'posts' }] });
 
     const post = endpoints.find((e) => e.method === 'POST')!;
-    expect(post.response).toEqual({ status: 201, body: { id: 99 } });
+    expect((post.responses as unknown[])[0]).toEqual({ name: 'created', status: 201, body: { id: 99 } });
     expect((post.request as Record<string, unknown>).bodyExample).toEqual({ name: 'Sara' });
 
     for (const e of endpoints) expect(sanitizeEndpoint(e).errors).toEqual([]);
@@ -81,7 +82,7 @@ describe('generateOpenApi', () => {
           method: 'GET',
           path: '/users/:id',
           tags: ['users'],
-          response: { status: 200, body: { id: 1 } },
+          responses: [{ id: 'success', name: 'Success', status: 200, body: { id: 1 } }],
           owner: 'sara',
           version: 2,
           createdAt: 't',

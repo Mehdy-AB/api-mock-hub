@@ -25,6 +25,24 @@ export interface MockResponse {
   delayMs?: number;
 }
 
+/**
+ * One of the answers an endpoint can give: the success body, a 404, a 409, a timeout…
+ * Adding or editing cases is a normal reviewed change; picking the live one is not (see ActiveCase).
+ */
+export interface ResponseCase extends MockResponse {
+  /** Stable within the endpoint, used by the switch and by the x-mock-case header. */
+  id: string;
+  name: string;
+  description?: string;
+}
+
+/** Which case the route serves right now. Switched by anyone, instantly, outside proposals and history. */
+export interface ActiveCase {
+  caseId: string;
+  by: string;
+  at: string;
+}
+
 /** The editable part of an endpoint. This is what proposals change and what import/export carry. */
 export interface EndpointContent {
   method: HttpMethod;
@@ -33,7 +51,8 @@ export interface EndpointContent {
   description?: string;
   tags: string[];
   request?: RequestDoc;
-  response: MockResponse;
+  /** At least one case. The first one answers when nothing is selected. */
+  responses: ResponseCase[];
 }
 
 export interface Endpoint extends EndpointContent {
@@ -42,6 +61,8 @@ export interface Endpoint extends EndpointContent {
   version: number;
   createdAt: string;
   updatedAt: string;
+  /** Not part of the content: switching it neither bumps the version nor writes a commit. */
+  active?: ActiveCase;
 }
 
 export const CHANGE_TYPES = ['add', 'update', 'delete'] as const;

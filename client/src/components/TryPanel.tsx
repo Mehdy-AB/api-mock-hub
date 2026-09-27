@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { Endpoint } from '../types';
-import { errorText, exampleText, paramNames, pretty } from '../util';
+import { activeCase, errorText, exampleText, paramNames, pretty } from '../util';
 import { Field } from './Common';
 import { HttpStatus } from './EndpointView';
 
@@ -49,6 +49,9 @@ export function TryPanel({ endpoint }: { endpoint: Endpoint }) {
       return '';
     }
   });
+  const live = activeCase(endpoint);
+  // '' = whatever the endpoint is set to return; anything else is just for this call.
+  const [caseId, setCaseId] = useState('');
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<Result | null>(null);
 
@@ -63,6 +66,7 @@ export function TryPanel({ endpoint }: { endpoint: Endpoint }) {
       const headers: Record<string, string> = {};
       if (sendBody) headers['Content-Type'] = 'application/json';
       if (mockKey) headers['x-mock-key'] = mockKey;
+      if (caseId) headers['x-mock-case'] = caseId;
       const res = await fetch(url, { method: endpoint.method, headers, body: sendBody });
       const text = endpoint.method === 'HEAD' ? '' : await res.text();
       let shown = text;
@@ -99,6 +103,7 @@ export function TryPanel({ endpoint }: { endpoint: Endpoint }) {
     `curl -i -X ${endpoint.method} ${quote(`${window.location.origin}${url}`)}`,
     sendBody ? ` -H 'Content-Type: application/json' -d ${quote(sendBody.replace(/\s*\n\s*/g, ' '))}` : '',
     mockKey ? ` -H ${quote(`x-mock-key: ${mockKey}`)}` : '',
+    caseId ? ` -H ${quote(`x-mock-case: ${caseId}`)}` : '',
   ].join('');
 
   return (
@@ -120,6 +125,18 @@ export function TryPanel({ endpoint }: { endpoint: Endpoint }) {
             </Field>
           ))}
         </div>
+      )}
+      {endpoint.responses.length > 1 && (
+        <Field label="Response case" hint="Only this call; it does not switch what others get">
+          <select value={caseId} onChange={(e) => setCaseId(e.target.value)}>
+            <option value="">As set now — {live.name} ({live.status})</option>
+            {endpoint.responses.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name} · {c.status}
+              </option>
+            ))}
+          </select>
+        </Field>
       )}
       <Field label="Query string" hint="For example page=1&size=20">
         <input type="text" className="mono" value={query} onChange={(e) => setQuery(e.target.value)} />

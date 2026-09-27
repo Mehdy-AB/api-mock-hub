@@ -1,11 +1,14 @@
 import {
+  activeCase,
   compareSpecificity,
+  findCase,
   normalizePath,
   pathError,
   routeKey,
   sanitizeEndpoint,
   toOpenApiPath,
 } from '../src/endpoints/route-rules';
+import { Endpoint } from '../src/storage/models';
 
 describe('route rules', () => {
   it('normalizes paths', () => {
@@ -40,7 +43,12 @@ describe('route rules', () => {
   it('validates and normalizes endpoint input', () => {
     const ok = sanitizeEndpoint({ method: 'get', path: 'users/:id/', response: { body: { id: 1 } } });
     expect(ok.errors).toEqual([]);
-    expect(ok.value).toEqual({ method: 'GET', path: '/users/:id', tags: [], response: { status: 200, body: { id: 1 } } });
+    expect(ok.value).toEqual({
+      method: 'GET',
+      path: '/users/:id',
+      tags: [],
+      responses: [{ id: 'success', name: 'Success', status: 200, body: { id: 1 } }],
+    });
 
     const bad = sanitizeEndpoint({ method: 'FETCH', path: '/_hub', response: { status: 99, headers: { a: 1 } } });
     expect(bad.value).toBeUndefined();
