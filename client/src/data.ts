@@ -1,7 +1,7 @@
 import { useEffect, useSyncExternalStore } from 'react';
 import { api } from './api';
-import type { CommitSummary, Endpoint, Proposal, ProposalSummary } from './types';
-import { errorText } from './util';
+import type { CommitSummary, Endpoint, Project, Proposal, ProposalSummary } from './types';
+import { errorText, fullPath as resolvePath, scopeName as resolveScope } from './util';
 
 /**
  * One shared cache for the sidebars and pages, so navigation is instant.
@@ -9,6 +9,7 @@ import { errorText } from './util';
  */
 export interface HubData {
   endpoints: Endpoint[];
+  projects: Project[];
   proposals: ProposalSummary[];
   commits: CommitSummary[];
   /** Open and conflicting proposals in full, so their edits show on the API page. */
@@ -17,7 +18,7 @@ export interface HubData {
   error?: string;
 }
 
-const initial: HubData = { endpoints: [], proposals: [], commits: [], openProposals: [], loaded: false };
+const initial: HubData = { endpoints: [], projects: [], proposals: [], commits: [], openProposals: [], loaded: false };
 let state: HubData = initial;
 let inflight: Promise<void> | null = null;
 const listeners = new Set<() => void>();
@@ -33,9 +34,15 @@ export const hubStore = {
   },
   refresh(): Promise<void> {
     if (inflight) return inflight;
-    inflight = Promise.all([api.endpoints(), api.proposals(), api.commits({ limit: 100 }), api.openProposals()])
-      .then(([endpoints, proposals, commits, openProposals]) => {
-        state = { endpoints, proposals, commits, openProposals, loaded: true };
+    inflight = Promise.all([
+      api.endpoints(),
+      api.projects(),
+      api.proposals(),
+      api.commits({ limit: 100 }),
+      api.openProposals(),
+    ])
+      .then(([endpoints, projects, proposals, commits, openProposals]) => {
+        state = { endpoints, projects, proposals, commits, openProposals, loaded: true };
         emit();
       })
       .catch((e) => {
@@ -67,3 +74,10 @@ export function useHubData(): HubData {
 }
 
 export const isOpen = (p: ProposalSummary) => p.status === 'open' || p.status === 'conflict';
+
+/** URL an endpoint answers on, using the projects in the cache. For components without props at hand. */
+export const fullPath = (c: { path: string; projectId?: string; layerId?: string }) =>
+  resolvePath(c, hubStore.get().projects);
+
+/** "HomeFit · Cloud API" from the cache. */
+export const scopeName = (c: { projectId?: string; layerId?: string }) => resolveScope(c, hubStore.get().projects);

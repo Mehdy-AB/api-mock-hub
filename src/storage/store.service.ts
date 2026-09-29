@@ -7,7 +7,7 @@ import { APP_CONFIG, AppConfig } from '../config/app-config';
 import { Mutex } from '../common/mutex';
 import { defaultCaseName } from '../endpoints/route-rules';
 import { readJson, writeJsonAtomic } from './json-file';
-import { Commit, Db, DEFAULT_SETTINGS, Endpoint, MockResponse, Proposal, Settings, User } from './models';
+import { Commit, Db, DEFAULT_SETTINGS, Endpoint, Layer, MockResponse, Project, Proposal, Settings, User } from './models';
 
 type StoredEndpoint = Endpoint & { response?: MockResponse };
 
@@ -36,7 +36,18 @@ function migrateResponseCases(endpoints: StoredEndpoint[]): boolean {
 }
 
 export type CollectionName = keyof Db;
-export const ALL_COLLECTIONS: CollectionName[] = ['endpoints', 'proposals', 'commits', 'users', 'settings'];
+export const ALL_COLLECTIONS: CollectionName[] = [
+  'projects',
+  'layers',
+  'endpoints',
+  'proposals',
+  'commits',
+  'users',
+  'settings',
+];
+
+/** Collections that change what the mock server answers, so caches must be rebuilt. */
+const ROUTE_COLLECTIONS: CollectionName[] = ['endpoints', 'projects', 'layers'];
 
 /**
  * In-memory database persisted as one JSON file per collection.
@@ -82,9 +93,10 @@ export class StoreService implements OnModuleInit {
     return this.mutex.runExclusive(async () => {
       this.assertLoaded();
       const backup = new Map(names.map((n) => [n, structuredClone(this.data[n])]));
+      const touchesRoutes = names.some((n) => ROUTE_COLLECTIONS.includes(n));
       const restore = () => {
         for (const [n, v] of backup) (this.data as unknown as Record<string, unknown>)[n] = v;
-        if (names.includes('endpoints')) this.revision++;
+        if (touchesRoutes) this.revision++;
       };
       let result: T;
       try {
@@ -100,7 +112,7 @@ export class StoreService implements OnModuleInit {
         restore();
         throw e;
       }
-      if (names.includes('endpoints')) this.revision++;
+      if (touchesRoutes) this.revision++;
       return result;
     });
   }
@@ -109,7 +121,9 @@ export class StoreService implements OnModuleInit {
     if (this.loaded) return;
     const dir = this.config.dataDir;
     await fs.mkdir(dir, { recursive: true });
-    const [endpoints, proposals, commits, users, settings] = await Promise.all([
+    const [projects, layers, endpoints, proposals, commits, users, settings] = await Promise.all([
+      readJson<Project[]>(this.file('projects'), []),
+      readJson<Layer[]>(this.file('layers'), []),
       readJson<Endpoint[]>(this.file('endpoints'), []),
       readJson<Proposal[]>(this.file('proposals'), []),
       readJson<Commit[]>(this.file('commits'), []),
@@ -117,6 +131,8 @@ export class StoreService implements OnModuleInit {
       readJson<Partial<Settings>>(this.file('settings'), {}),
     ]);
     this.data = {
+      projects,
+      layers,
       endpoints,
       proposals,
       commits,
@@ -146,7 +162,8 @@ export class StoreService implements OnModuleInit {
       }
     }
     this.logger.log(
-      `Loaded ${endpoints.length} endpoints, ${proposals.length} proposals, ${commits.length} commits from ${dir}`,
+      `Loaded ${endpoints.length} endpoints in ${projects.length} project(s), ${proposals.length} proposals, ` +
+        `${commits.length} commits from ${dir}`,
     );
   }
 

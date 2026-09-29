@@ -525,3 +525,20 @@ details > summary { cursor: pointer; font-weight: 600; }
 .case-add { border-style: dashed; }
 .case-editor { border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; background: var(--surface-2); }
 .rd-case-flag { margin-left: 6px; }
+
+/* ---------- projects and layers ---------- */
+.op-section { display: flex; flex-direction: column; gap: 10px; }
+.op-section-head {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  border-bottom: 1px solid var(--border); padding-bottom: 6px;
+}
+.op-section-head h2 { margin: 0; font-size: 17px; }
+.op-section .op-group { display: flex; flex-direction: column; gap: 8px; }
+.op-section .op-group-title { margin: 4px 0 0; font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+.url-preview { margin: -4px 0 0; }
+.scope-card { gap: 10px; }
+.scope-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.scope-row input { flex: 1 1 140px; min-width: 120px; }
+.scope-row.layer { padding-left: 16px; border-left: 2px solid var(--border); }
+.scope-row.add input { flex: 1 1 120px; }
+.scope-layers { gap: 8px; }

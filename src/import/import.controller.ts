@@ -1,14 +1,26 @@
 import { BadRequestException, Body, Controller, ForbiddenException, Injectable, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiProperty, ApiPropertyOptional, ApiQuery, ApiTags } from '@nestjs/swagger';
-import { Allow, IsDefined, IsIn, IsOptional, IsString, MaxLength } from 'class-validator';
+import { randomUUID } from 'crypto';
+import { Allow, IsBoolean, IsDefined, IsIn, IsOptional, IsString, MaxLength } from 'class-validator';
 import { CurrentUser } from '../auth/decorators';
+import { isPlainObject } from '../common/json-utils';
+import { nowIso } from '../common/util';
 import { API_BASE } from '../constants';
-import { routeKey, routeLabel, sameContent, sanitizeEndpoint } from '../endpoints/route-rules';
-import { PROPOSAL_COLLECTIONS, ChangeInput, ProposalsService } from '../proposals/proposals.service';
-import { AuthUser, EndpointContent, PROPOSAL_KINDS, ProposalKind } from '../storage/models';
-import { StoreService } from '../storage/store.service';
-import { detectFormat, extractHubItems } from './hub-format';
+import {
+  basePathError,
+  normalizeBasePath,
+  PathIndex,
+  sameContent,
+  sanitizeEndpoint,
+  uniqueKey,
+} from '../endpoints/route-rules';
+import { ChangeInput, PROPOSAL_COLLECTIONS, ProposalsService } from '../proposals/proposals.service';
+import { AuthUser, Db, EndpointContent, Layer, PROPOSAL_KINDS, Project, ProposalKind } from '../storage/models';
+import { CollectionName, StoreService } from '../storage/store.service';
+import { DeclaredProject, detectFormat, extractHubItems, extractHubProjects } from './hub-format';
 import { parseOpenApi } from './openapi-parser';
+
+const IMPORT_COLLECTIONS: CollectionName[] = ['projects', 'layers', ...PROPOSAL_COLLECTIONS];
 
 export class ImportDto {
   @ApiPropertyOptional({ enum: ['auto', 'hub', 'openapi'], default: 'auto' })
@@ -52,7 +64,127 @@ export class ImportDto {
   @IsOptional()
   @IsIn([...PROPOSAL_KINDS])
   kind?: ProposalKind;
+
+  @ApiPropertyOptional({
+    example: 'homefit',
+    description: 'Project key or id every imported endpoint goes into, unless an endpoint names its own "project".',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  project?: string;
+
+  @ApiPropertyOptional({ example: 'local', description: 'Layer key or id inside that project' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  layer?: string;
+
+  @ApiPropertyOptional({
+    description: 'Create the projects and layers the file refers to when they do not exist yet (admin or backend only)',
+  })
+  @IsOptional()
+  @IsBoolean()
+  createMissing?: boolean;
 }
+
+/**
+ * Puts each imported endpoint into a project and a layer.
+ * Endpoints may name their own "project" and "layer" keys; otherwise the import-wide ones apply.
+ */
+class ScopeResolver {
+  private readonly declared = new Map<string, DeclaredProject>();
+  private readonly created: string[] = [];
+
+  constructor(
+    private readonly db: Db,
+    declared: DeclaredProject[],
+    private readonly dto: ImportDto,
+    private readonly user: AuthUser,
+    private readonly warnings: string[],
+  ) {
+    for (const d of declared) this.declared.set(d.key, d);
+  }
+
+  assign(content: EndpointContent, raw: unknown): EndpointContent {
+    const item = isPlainObject(raw) ? raw : {};
+    const projectRef = str(item.project) ?? this.dto.project;
+    const layerRef = str(item.layer) ?? (str(item.project) ? undefined : this.dto.layer);
+    if (!projectRef) return content;
+    const project = this.project(projectRef);
+    const layer = layerRef ? this.layer(project, layerRef) : undefined;
+    return { ...content, projectId: project.id, ...(layer ? { layerId: layer.id } : {}) };
+  }
+
+  /** Projects and layers this import created, so the caller can see the new structure. */
+  touched(): string[] {
+    return this.created;
+  }
+
+  private project(ref: string): Project {
+    const found = this.db.projects.find((p) => p.key === ref || p.id === ref);
+    if (found) return found;
+    const declared = this.declared.get(ref);
+    this.assertMayCreate(`project "${ref}"`);
+    const now = nowIso();
+    const project: Project = {
+      id: randomUUID(),
+      key: uniqueKey(ref, new Set(this.db.projects.map((p) => p.key)), 'project'),
+      name: declared?.name?.trim() || ref,
+      description: declared?.description?.trim() || undefined,
+      basePath: this.basePath(declared?.basePath, `project "${ref}"`),
+      order: this.db.projects.length,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.db.projects.push(project);
+    this.created.push(`project ${project.key}`);
+    return project;
+  }
+
+  private layer(project: Project, ref: string): Layer {
+    const found = this.db.layers.find((l) => l.projectId === project.id && (l.key === ref || l.id === ref));
+    if (found) return found;
+    const declared = this.declared.get(project.key)?.layers?.find((l) => l.key === ref);
+    this.assertMayCreate(`layer "${ref}" of project "${project.key}"`);
+    const now = nowIso();
+    const layer: Layer = {
+      id: randomUUID(),
+      projectId: project.id,
+      key: uniqueKey(ref, new Set(this.db.layers.filter((l) => l.projectId === project.id).map((l) => l.key)), 'layer'),
+      name: declared?.name?.trim() || ref,
+      description: declared?.description?.trim() || undefined,
+      basePath: this.basePath(declared?.basePath, `layer "${ref}"`),
+      order: this.db.layers.filter((l) => l.projectId === project.id).length,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.db.layers.push(layer);
+    this.created.push(`layer ${project.key}/${layer.key}`);
+    return layer;
+  }
+
+  private assertMayCreate(what: string): void {
+    if (!this.dto.createMissing) {
+      throw new Error(`no ${what} in this hub. Create it first, or send "createMissing": true.`);
+    }
+    if (this.user.role !== 'admin' && this.user.role !== 'backend') {
+      throw new ForbiddenException(`Only admins and backend users can create ${what}`);
+    }
+  }
+
+  private basePath(raw: string | undefined, what: string): string {
+    const basePath = normalizeBasePath(raw);
+    const bad = basePathError(basePath);
+    if (bad) {
+      this.warnings.push(`${what}: ignored basePath "${raw}" (${bad})`);
+      return '';
+    }
+    return basePath;
+  }
+}
+
+const str = (v: unknown): string | undefined => (typeof v === 'string' && v.trim() ? v.trim() : undefined);
 
 @Injectable()
 export class ImportService {
@@ -79,37 +211,49 @@ export class ImportService {
       throw new BadRequestException(e.message);
     }
     if (!items.length) throw new BadRequestException('No endpoints found in the import data');
+    const declared = format === 'hub' ? extractHubProjects(dto.data) : [];
 
-    const errors: string[] = [];
-    const contents: EndpointContent[] = [];
-    const seen = new Set<string>();
-    items.forEach((item, i) => {
-      const r = sanitizeEndpoint(item, `endpoints[${i}]`);
-      if (!r.value) return errors.push(...r.errors);
-      const key = routeKey(r.value.method, r.value.path);
-      if (seen.has(key)) return errors.push(`endpoints[${i}]: ${routeLabel(r.value)} appears more than once`);
-      seen.add(key);
-      contents.push(r.value);
-    });
-    if (errors.length) throw new BadRequestException({ statusCode: 400, message: 'Invalid import data', errors });
+    return this.store.write(IMPORT_COLLECTIONS, (db) => {
+      const scopes = new ScopeResolver(db, declared, dto, user, warnings);
+      const errors: string[] = [];
+      const contents: EndpointContent[] = [];
+      items.forEach((item, i) => {
+        const at = `endpoints[${i}]`;
+        const r = sanitizeEndpoint(item, at);
+        if (!r.value) return errors.push(...r.errors);
+        try {
+          contents.push(scopes.assign(r.value, item));
+        } catch (e) {
+          if (e instanceof ForbiddenException) throw e;
+          errors.push(`${at}: ${e.message}`);
+        }
+      });
 
-    return this.store.write(PROPOSAL_COLLECTIONS, (db) => {
+      const paths = new PathIndex(db.projects, db.layers);
+      const seen = new Set<string>();
+      contents.forEach((c, i) => {
+        const key = paths.key(c);
+        if (seen.has(key)) errors.push(`endpoints[${i}]: ${paths.label(c)} appears more than once`);
+        seen.add(key);
+      });
+      if (errors.length) throw new BadRequestException({ statusCode: 400, message: 'Invalid import data', errors });
+
       const summary = { added: [] as string[], updated: [] as string[], unchanged: [] as string[] };
       const changes: ChangeInput[] = [];
       for (const c of contents) {
-        const key = routeKey(c.method, c.path);
-        const existing = db.endpoints.find((e) => routeKey(e.method, e.path) === key);
+        const key = paths.key(c);
+        const existing = db.endpoints.find((e) => paths.key(e) === key);
         if (!existing) {
           changes.push({ type: 'add', endpoint: c });
-          summary.added.push(routeLabel(c));
+          summary.added.push(paths.label(c));
         } else if (sameContent(existing, c)) {
-          summary.unchanged.push(routeLabel(c));
+          summary.unchanged.push(paths.label(c));
         } else {
           changes.push({ type: 'update', endpointId: existing.id, endpoint: c });
-          summary.updated.push(routeLabel(c));
+          summary.updated.push(paths.label(c));
         }
       }
-      if (!changes.length) return { proposal: null, format, summary, warnings };
+      if (!changes.length) return { proposal: null, format, summary, warnings, created: scopes.touched() };
 
       const p = this.proposals.createIn(
         db,
@@ -123,7 +267,13 @@ export class ImportService {
       );
       if (direct) this.proposals.applyIn(db, p, [user.username]);
       else this.proposals.autoApplyIfReady(db, p);
-      return { proposal: this.proposals.view(db.settings, p), format, summary, warnings };
+      return {
+        proposal: this.proposals.view(db.settings, p),
+        format,
+        summary,
+        warnings,
+        created: scopes.touched(),
+      };
     });
   }
 }
@@ -141,7 +291,16 @@ export class ImportController {
       'New routes become "add" changes, changed routes become "update" changes, identical ones are skipped. Nothing is deleted.',
   })
   @ApiQuery({ name: 'direct', required: false, type: Boolean, description: 'Admin only: apply without review' })
-  import(@Body() dto: ImportDto, @CurrentUser() user: AuthUser, @Query('direct') direct?: string) {
-    return this.importer.import(dto, user, direct === 'true' || direct === '1');
+  @ApiQuery({ name: 'project', required: false, description: 'Project key or id for every endpoint of this import' })
+  @ApiQuery({ name: 'layer', required: false, description: 'Layer key or id inside that project' })
+  import(
+    @Body() dto: ImportDto,
+    @CurrentUser() user: AuthUser,
+    @Query('direct') direct?: string,
+    @Query('project') project?: string,
+    @Query('layer') layer?: string,
+  ) {
+    const scoped: ImportDto = { ...dto, project: dto.project ?? project, layer: dto.layer ?? layer };
+    return this.importer.import(scoped, user, direct === 'true' || direct === '1');
   }
 }

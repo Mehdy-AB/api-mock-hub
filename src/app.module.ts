@@ -6,6 +6,7 @@ import { ImportController, ImportService } from './import/import.controller';
 import { MockService } from './mock/mock.service';
 import { RegistryService } from './mock/registry.service';
 import { HubController } from './openapi/hub.controller';
+import { ProjectsController } from './projects/projects.controller';
 import { CommitsController } from './proposals/commits.controller';
 import { ProposalsController } from './proposals/proposals.controller';
 import { ProposalsService } from './proposals/proposals.service';
@@ -22,6 +23,7 @@ export class CoreModule {}
 @Module({
   controllers: [
     HubController,
+    ProjectsController,
     EndpointsController,
     ProposalsController,
     CommitsController,

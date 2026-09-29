@@ -13,6 +13,7 @@ Every change is recorded as a commit or a reviewed proposal, so nobody waits for
 
 - **Swagger-style workspace.** One page lists every endpoint. Open a row and edit method, path, status, headers, body, delay and request docs in place, next to a live "Try it" panel.
 - **Save or propose.** Save applies your edits at once as a commit. Propose sends them for review; nothing goes live until someone approves.
+- **Projects and layers.** Group the mocks of each product in a project (HomeFit, Shop…) and split it into layers — cloud API, local server, core services. Both can carry a URL prefix, so `/gym/members` can exist in several layers at once and answer on `/homefit/api/gym/members` and `/homefit/local/gym/members`. Every project gets its own Swagger page and its own export.
 - **Several responses per endpoint.** A route holds a success case and as many error cases as you need (`404`, `409`, a slow one…). A picker on the row chooses which one it answers with **right now**: it applies instantly, with no proposal, no approval and no commit, so testing an error state is one click. Adding or editing the cases themselves stays a normal reviewed change.
 - **Review on the same page.** Open proposals show every edit as a readable diff (`GET /users?page=1`, old values in red, new in green), a discussion thread, and Approve, Request changes, Reject and Withdraw buttons. Authors edit a proposal in place.
 - **History you can undo.** Every commit is listed in the side panel with its diff. Any teammate can discard a commit, which undoes it for everyone as a new commit.
@@ -93,13 +94,14 @@ For hot reload on the UI, keep the server running and start `npm run dev:ui`, th
 
 Everything happens on the API page.
 
-1. **Edit.** Click a row to open it and change any field. "+ New endpoint" adds a row; each row also has Duplicate and Delete. Tick several rows for bulk changes.
-2. **Choose what it returns.** When a row has more than one case, the **returns** picker in its header switches the live one for everybody, the moment you pick it: no message, no review, no history. Inside the row, the case tabs (`200 Success`, `404 Not found`…) hold each case; the green dot marks the live one, and "Return this case now" switches to the open one. **+ Add case**, renaming and editing a case are ordinary edits, so they go through the save bar below.
-3. **Save or Propose.** As soon as something differs from the live version, a bar appears at the bottom with an optional message, **Cancel**, **Propose** and **Save**. Edits across several endpoints go into one commit or proposal.
-4. **Review.** Open proposals appear at the top of the page, with their edits, discussion and review buttons. Proposals waiting for you open automatically, and the header shows how many there are.
-5. **History.** The side panel lists commits. Open one to see what changed, and discard it if needed. When an endpoint is selected, the panel shows only that endpoint's proposals and history.
-6. **Real backend.** Each commit shows "✓ in backend" or "not in backend". Backend users and admins open a commit and click **Mark done in backend**, optionally with a note. Filter History by "Not in backend" to see what the real backend still has to build.
-7. **Import.** The Import button opens a popup: paste or upload hub JSON or an OpenAPI file, and the result appears right there.
+1. **Organise.** **Projects** opens the popup where admins and backend users add projects and layers and set their prefixes. It applies at once, without review. Endpoints are grouped by project and layer on the page, and the filter next to the method picker narrows the page to one of them.
+2. **Edit.** Click a row to open it and change any field. The Project and Layer selects inside a row move it, which changes the URL it answers on, so it is a normal edit that goes through Save or Propose. "+ New endpoint" adds a row; each row also has Duplicate and Delete. Tick several rows for bulk changes.
+3. **Choose what it returns.** When a row has more than one case, the **returns** picker in its header switches the live one for everybody, the moment you pick it: no message, no review, no history. Inside the row, the case tabs (`200 Success`, `404 Not found`…) hold each case; the green dot marks the live one, and "Return this case now" switches to the open one. **+ Add case**, renaming and editing a case are ordinary edits, so they go through the save bar below.
+4. **Save or Propose.** As soon as something differs from the live version, a bar appears at the bottom with an optional message, **Cancel**, **Propose** and **Save**. Edits across several endpoints go into one commit or proposal.
+5. **Review.** Open proposals appear at the top of the page, with their edits, discussion and review buttons. Proposals waiting for you open automatically, and the header shows how many there are.
+6. **History.** The side panel lists commits. Open one to see what changed, and discard it if needed. When an endpoint is selected, the panel shows only that endpoint's proposals and history.
+7. **Real backend.** Each commit shows "✓ in backend" or "not in backend". Backend users and admins open a commit and click **Mark done in backend**, optionally with a note. Filter History by "Not in backend" to see what the real backend still has to build.
+8. **Import.** The Import button opens a popup: paste or upload hub JSON or an OpenAPI file, and the result appears right there.
 
 A mock `404` response includes a `create` link that opens a new endpoint row with the method and path filled in.
 
@@ -166,6 +168,35 @@ curl -i $HUB/users/42
 # {"id":1,"name":"Sara"}
 ```
 
+**Projects and layers.** Instant, admin or backend, no proposal:
+
+```bash
+# A project and two layers
+P=$(curl -s $HUB/_hub/api/projects -H "authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+  -d '{"name":"HomeFit","basePath":"/homefit"}' | jq -r .id)
+curl -s $HUB/_hub/api/projects/$P/layers -H "authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+  -d '{"name":"Cloud API","basePath":"/api"}'
+curl -s $HUB/_hub/api/projects/$P/layers -H "authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+  -d '{"name":"Gym local","basePath":"/local"}'
+
+# Import into one of them; the endpoint paths stay relative
+curl -s "$HUB/_hub/api/import?direct=true&project=homefit&layer=gym-local" \
+  -H "authorization: Bearer $TOKEN" -H 'content-type: application/json' -d @homefit-local-gym.json
+
+curl -i $HUB/homefit/local/gym/members     # served here
+```
+
+| Call | Effect |
+|---|---|
+| `GET /projects` | Projects with their layers, prefixes and endpoint counts |
+| `POST /projects` · `PATCH /projects/{id}` · `DELETE /projects/{id}` | Add, rename, re-prefix, delete (only when empty) |
+| `POST /projects/{id}/layers` · `PATCH` · `DELETE` | Same for layers |
+| `GET /endpoints?project=homefit&layer=gym-local` | Filter, `project=none` for endpoints outside any project |
+| `GET /endpoints/export?project=homefit` | Hub JSON of one project, structure included |
+| `GET /_hub/openapi.json?project=homefit` · `/_hub/docs/?project=homefit` | Swagger of one project |
+
+Changing a prefix moves every endpoint under it at once. It is refused with `409` if two mocks would end up on the same URL.
+
 **Several response cases.** Use `responses` instead of `response`. The first case answers until someone switches it; ids are derived from the names when left out.
 
 ```bash
@@ -227,6 +258,7 @@ The other is marked `conflict`, and its author rebases or edits it. A commit can
 `POST /_hub/api/import` turns a file into one proposal. New routes become adds, changed routes become updates, identical routes are skipped, and nothing is deleted. It accepts:
 
 - a hub export `{ "endpoints": [ … ] }`, a plain array of endpoints, or one endpoint;
+- `project` and `layer` (keys or ids), either per import or per endpoint. With `"createMissing": true` an admin or backend user also creates the projects and layers the file declares under `projects`, so an export from another hub restores its structure;
 - a whole OpenAPI 3 or Swagger 2 document. **Every documented status becomes a response case** (2xx first, and the first one is served); each example is used as the body, or a sample is generated from the schema.
 
 An endpoint carries either `responses` (a list of cases) or `response` (a single one), never both. Older files with `response` keep importing, and stored endpoints are upgraded to a one-case list on first start.
@@ -268,6 +300,7 @@ A proposal's `kind` is `publish` for a backend contract or `request` for a front
 
 ## Mock behaviour
 
+- The URL is the project prefix, then the layer prefix, then the endpoint path: `/homefit` + `/api` + `/gym/members`. Endpoints in no project answer at their own path.
 - Paths use Express style: `/users/:id` and `/files/*rest`. The most specific route wins, so `/users/me` beats `/users/:id`.
 - Paths that differ only by parameter name or letter case count as the same route.
 - `HEAD` falls back to the `GET` mock. `OPTIONS` is reserved for CORS, which allows every origin.

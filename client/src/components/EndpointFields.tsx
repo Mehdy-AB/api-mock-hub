@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { HttpMethod, METHODS } from '../types';
-import { paramNames, parseJsonText, pretty, uid } from '../util';
+import { HttpMethod, METHODS, Project } from '../types';
+import { fullPath, paramNames, parseJsonText, pretty, uid } from '../util';
 import { Field } from './Common';
 import { blankCase, CaseErrors, CaseForm, defaultCaseName, Errors, FormState, normalizePath, ParamRow } from './form-model';
 import { JsonEditor } from './JsonEditor';
@@ -205,6 +205,7 @@ export function EndpointFields({
   idPrefix,
   activeCaseId,
   onActivate,
+  projects = [],
 }: {
   form: FormState;
   onChange: (next: FormState) => void;
@@ -214,6 +215,8 @@ export function EndpointFields({
   activeCaseId?: string;
   /** Switch the live case. Instant, so it is not part of the save. */
   onActivate?: (caseId: string) => void;
+  /** Projects to choose from. Their prefixes decide the URL this endpoint answers on. */
+  projects?: Project[];
 }) {
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) => onChange({ ...f, [key]: value });
   const names = paramNames(normalizePath(f.path));
@@ -223,6 +226,7 @@ export function EndpointFields({
   );
   const statusList = `status-codes-${idPrefix}`;
   const current = f.cases.find((c) => c.key === f.caseKey) ?? f.cases[0];
+  const currentProject = projects.find((p) => p.id === f.projectId);
 
   const patchCase = (key: string, patch: Partial<CaseForm>) =>
     onChange({ ...f, cases: f.cases.map((c) => (c.key === key ? { ...c, ...patch } : c)) });
@@ -267,6 +271,39 @@ export function EndpointFields({
           <input type="text" value={f.tags} placeholder="users" onChange={(e) => set('tags', e.target.value)} />
         </Field>
       </div>
+
+      {projects.length > 0 && (
+        <div className="form-row-2">
+          <Field label="Project">
+            <select
+              value={f.projectId}
+              onChange={(e) => onChange({ ...f, projectId: e.target.value, layerId: '' })}
+            >
+              <option value="">No project</option>
+              {projects.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                  {p.basePath ? ` (${p.basePath})` : ''}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Layer" hint={f.projectId ? undefined : 'Pick a project first'}>
+            <select value={f.layerId} disabled={!currentProject} onChange={(e) => set('layerId', e.target.value)}>
+              <option value="">No layer</option>
+              {(currentProject?.layers ?? []).map((l) => (
+                <option key={l.id} value={l.id}>
+                  {l.name}
+                  {l.basePath ? ` (${l.basePath})` : ''}
+                </option>
+              ))}
+            </select>
+          </Field>
+        </div>
+      )}
+      <p className="muted small url-preview">
+        Answers on <code className="mono">{fullPath({ path: normalizePath(f.path) || '/', projectId: f.projectId, layerId: f.layerId }, projects)}</code>
+      </p>
 
       <div className="case-tabs" role="tablist" aria-label="Response cases">
         {f.cases.map((c) => {

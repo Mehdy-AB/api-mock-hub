@@ -1,4 +1,4 @@
-import type { Endpoint, EndpointContent, ResponseCase } from './types';
+import type { Endpoint, EndpointContent, Layer, Project, ResponseCase } from './types';
 
 export function pretty(v: unknown): string {
   return v === undefined ? '' : JSON.stringify(v, null, 2);
@@ -52,6 +52,8 @@ export function sameJson(a: unknown, b: unknown): boolean {
 
 export function contentOf(e: EndpointContent): EndpointContent {
   const c: EndpointContent = { method: e.method, path: e.path, tags: e.tags ?? [], responses: e.responses };
+  if (e.projectId !== undefined) c.projectId = e.projectId;
+  if (e.layerId !== undefined) c.layerId = e.layerId;
   if (e.summary !== undefined) c.summary = e.summary;
   if (e.description !== undefined) c.description = e.description;
   if (e.request !== undefined) c.request = e.request;
@@ -72,6 +74,42 @@ const NAME = /[:*]([A-Za-z_$][\w$]*)/g;
 
 export function paramNames(path: string): string[] {
   return [...path.matchAll(NAME)].map((m) => m[1]);
+}
+
+export function normalizeBasePath(raw: string): string {
+  const p = raw.trim();
+  if (!p || p === '/') return '';
+  return p.startsWith('/') ? p.replace(/\/{2,}/g, '/').replace(/\/+$/, '') : `/${p}`.replace(/\/+$/, '');
+}
+
+/** The URL an endpoint answers on: project prefix + layer prefix + its own path. */
+export function fullPath(
+  c: { path: string; projectId?: string; layerId?: string },
+  projects: Project[] = [],
+): string {
+  const project = c.projectId ? projects.find((p) => p.id === c.projectId) : undefined;
+  const layer = c.layerId ? project?.layers.find((l) => l.id === c.layerId) : undefined;
+  const joined = `${project?.basePath ?? ''}${layer?.basePath ?? ''}${c.path}`;
+  return joined ? joined.replace(/\/{2,}/g, '/') : '/';
+}
+
+export function findLayer(projects: Project[], layerId?: string): Layer | undefined {
+  if (!layerId) return undefined;
+  for (const p of projects) {
+    const l = p.layers.find((x) => x.id === layerId);
+    if (l) return l;
+  }
+  return undefined;
+}
+
+/** "HomeFit · Cloud API", or '' when the endpoint belongs to no project. */
+export function scopeName(
+  c: { projectId?: string; layerId?: string },
+  projects: Project[] = [],
+): string {
+  const project = c.projectId ? projects.find((p) => p.id === c.projectId) : undefined;
+  const layer = findLayer(projects, c.layerId);
+  return [project?.name, layer?.name].filter(Boolean).join(' · ');
 }
 
 /** Same rule as the server: routes differing only by param name or case collide. */

@@ -43,10 +43,46 @@ export interface ActiveCase {
   at: string;
 }
 
+/**
+ * A product or service whose mocks live together, such as "HomeFit".
+ * Its basePath is prepended to every endpoint inside it, so two projects can own the same route.
+ */
+export interface Project {
+  id: string;
+  /** Slug used in import files, exports and the ?project= filters. Unique. */
+  key: string;
+  name: string;
+  description?: string;
+  /** '' or a static prefix such as '/homefit'. */
+  basePath: string;
+  order: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** A tier inside a project: the cloud API, the local server, the core services… */
+export interface Layer {
+  id: string;
+  projectId: string;
+  /** Slug, unique within its project. */
+  key: string;
+  name: string;
+  description?: string;
+  /** '' or a static prefix such as '/api', added after the project's. */
+  basePath: string;
+  order: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 /** The editable part of an endpoint. This is what proposals change and what import/export carry. */
 export interface EndpointContent {
   method: HttpMethod;
+  /** Relative to the project and layer prefixes. The served URL is project.basePath + layer.basePath + path. */
   path: string;
+  /** Project this endpoint belongs to. Moving it is a reviewed edit, because the served URL changes. */
+  projectId?: string;
+  layerId?: string;
   summary?: string;
   description?: string;
   tags: string[];
@@ -185,6 +221,8 @@ export const DEFAULT_SETTINGS: Settings = {
 };
 
 export interface Db {
+  projects: Project[];
+  layers: Layer[];
   endpoints: Endpoint[];
   proposals: Proposal[];
   commits: Commit[];

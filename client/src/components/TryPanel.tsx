@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { Endpoint } from '../types';
+import { fullPath } from '../data';
 import { activeCase, errorText, exampleText, paramNames, pretty } from '../util';
 import { Field } from './Common';
 import { HttpStatus } from './EndpointView';
@@ -24,7 +25,9 @@ function buildPath(path: string, params: Record<string, string>): string {
 
 /** Sends a real request to the live mock from the browser. */
 export function TryPanel({ endpoint }: { endpoint: Endpoint }) {
-  const names = paramNames(endpoint.path);
+  // The project and layer prefixes are part of the URL the mock answers on.
+  const template = endpoint.url ?? fullPath(endpoint);
+  const names = paramNames(template);
   const hasBody = endpoint.method !== 'GET' && endpoint.method !== 'HEAD';
 
   const [params, setParams] = useState<Record<string, string>>(() =>
@@ -56,7 +59,7 @@ export function TryPanel({ endpoint }: { endpoint: Endpoint }) {
   const [result, setResult] = useState<Result | null>(null);
 
   const q = query.trim().replace(/^\?/, '');
-  const url = buildPath(endpoint.path, params) + (q ? `?${q}` : '');
+  const url = buildPath(template, params) + (q ? `?${q}` : '');
   const sendBody = hasBody && body.trim() ? body : undefined;
 
   const send = async () => {

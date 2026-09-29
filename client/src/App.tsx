@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect } from 'react';
 import { useAuth, useUser } from './auth';
 import { ActivityPanel } from './components/ActivityPanel';
 import { ImportDialog, importDialog } from './components/ImportDialog';
+import { ProjectsDialog } from './components/ProjectsDialog';
 import { Loading, NotFound } from './components/Common';
 import { hubStore, useHubData } from './data';
 import { draftStore, useDraft } from './draft';
@@ -159,6 +160,7 @@ export function App() {
         )}
       </div>
       <ImportDialog />
+      <ProjectsDialog />
     </>
   );
 }

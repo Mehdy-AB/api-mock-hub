@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { fullPath, scopeName } from '../data';
 import type { EndpointContent, ParamDoc } from '../types';
 import { exampleText, pretty, sameJson } from '../util';
 import { JsonDiff } from './JsonDiff';
@@ -109,10 +110,15 @@ export function ReadableDiff({ before, after }: { before?: EndpointContent; afte
 
   return (
     <div className="readable-diff">
+      {show((e) => scopeName(e)) && (
+        <Row label="Project">
+          <Toks toks={diffTokens(...entries((e) => one('s', scopeName(e) || 'No project')))} sep=" " />
+        </Row>
+      )}
       <Row label="Request">
         <span className="mono">
           <Toks toks={diffTokens(...entries((e) => one('m', e.method)))} sep=" " />{' '}
-          <Toks toks={diffTokens(...entries((e) => one('p', e.path)))} sep=" " />
+          <Toks toks={diffTokens(...entries((e) => one('p', fullPath(e))))} sep=" " />
           {queryToks.length > 0 && (
             <>
               <span className="tok-q">?</span>

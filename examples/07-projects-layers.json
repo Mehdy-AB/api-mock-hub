@@ -1,0 +1,91 @@
+{
+  "title": "HomeFit: cloud and gym-server layers",
+  "message": "One project, two layers. The same route exists in both: the cloud answers for the mobile app, the gym server for the kiosk on site.",
+  "kind": "publish",
+  "project": "homefit",
+  "layer": "local",
+  "createMissing": true,
+  "data": {
+    "projects": [
+      {
+        "key": "homefit",
+        "name": "HomeFit",
+        "description": "Gym SaaS: cloud backend and one server per gym",
+        "basePath": "/homefit",
+        "layers": [
+          { "key": "cloud", "name": "Cloud API", "basePath": "/api", "description": "Backoffice and mobile apps" },
+          { "key": "local", "name": "Gym local", "basePath": "/local", "description": "Runs in the gym, works offline" }
+        ]
+      }
+    ],
+    "endpoints": [
+      {
+        "method": "GET",
+        "path": "/gym/members",
+        "tags": ["members"],
+        "summary": "Members cached on the gym server",
+        "description": "Answers on /homefit/local/gym/members. Works while the gym is offline.",
+        "request": { "query": [{ "name": "q", "example": "haddad" }] },
+        "responses": [
+          {
+            "name": "Success",
+            "status": 200,
+            "body": {
+              "data": [{ "id": "a3000001", "first_name": "Sara", "last_name": "Haddad", "status": "active", "cached": true }],
+              "meta": { "page": 1, "limit": 20, "total": 1, "total_pages": 1 }
+            }
+          },
+          {
+            "name": "Offline and stale",
+            "status": 200,
+            "description": "The gym has not synced for a while",
+            "headers": { "X-Sync-Age": "5400" },
+            "body": {
+              "data": [{ "id": "a3000001", "first_name": "Sara", "last_name": "Haddad", "status": "active", "cached": true }],
+              "meta": { "page": 1, "limit": 20, "total": 1, "total_pages": 1 },
+              "warning": "Données locales, dernière synchronisation il y a 1 h 30"
+            }
+          }
+        ]
+      },
+      {
+        "method": "POST",
+        "path": "/gym/checkins/scan",
+        "tags": ["checkins"],
+        "summary": "Badge scan at the door",
+        "request": { "bodyExample": { "nfc_uid": "04A2B3C4D5E6F7" } },
+        "responses": [
+          { "name": "Granted", "status": 200, "delayMs": 120, "body": { "decision": "granted", "member_name": "Sara Haddad" } },
+          {
+            "name": "Expired",
+            "status": 200,
+            "body": { "decision": "denied", "reason": "subscription_expired", "member_name": "Sara Haddad" }
+          }
+        ]
+      },
+      {
+        "method": "GET",
+        "path": "/gym/members",
+        "layer": "cloud",
+        "tags": ["members"],
+        "summary": "Members from the cloud",
+        "description": "Same route, other layer: answers on /homefit/api/gym/members.",
+        "response": {
+          "status": 200,
+          "body": {
+            "data": [{ "id": "a3000001", "first_name": "Sara", "last_name": "Haddad", "status": "active", "home_gym": "FitChain Hydra" }],
+            "meta": { "page": 1, "limit": 20, "total": 1, "total_pages": 1 }
+          }
+        }
+      },
+      {
+        "method": "GET",
+        "path": "/health",
+        "layer": "cloud",
+        "tags": ["system"],
+        "summary": "Cloud health",
+        "response": { "status": 200, "body": { "status": "ok", "version": "1.4.2" } }
+      }
+    ]
+  }
+}

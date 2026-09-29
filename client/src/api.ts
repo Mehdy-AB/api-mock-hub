@@ -4,6 +4,9 @@ import type {
   CommitSummary,
   Endpoint,
   ImportResult,
+  Layer,
+  Project,
+  ProjectInput,
   Proposal,
   ProposalKind,
   ProposalPayload,
@@ -102,6 +105,18 @@ export const api = {
     request<void>('POST', '/auth/password', { currentPassword, newPassword }),
 
   endpoints: () => request<Endpoint[]>('GET', '/endpoints'),
+
+  projects: () => request<Project[]>('GET', '/projects'),
+  createProject: (body: ProjectInput) => request<Project>('POST', '/projects', body),
+  updateProject: (projectId: string, body: ProjectInput) =>
+    request<Project>('PATCH', `/projects/${id(projectId)}`, body),
+  deleteProject: (projectId: string) => request<{ deleted: string }>('DELETE', `/projects/${id(projectId)}`),
+  createLayer: (projectId: string, body: ProjectInput) =>
+    request<Layer>('POST', `/projects/${id(projectId)}/layers`, body),
+  updateLayer: (projectId: string, layerId: string, body: ProjectInput) =>
+    request<Layer>('PATCH', `/projects/${id(projectId)}/layers/${id(layerId)}`, body),
+  deleteLayer: (projectId: string, layerId: string) =>
+    request<{ deleted: string }>('DELETE', `/projects/${id(projectId)}/layers/${id(layerId)}`),
   endpoint: (endpointId: string) => request<Endpoint>('GET', `/endpoints/${id(endpointId)}`),
   /** Switch what a route returns right now. Instant: no proposal, no review, no commit. */
   setActiveCase: (endpointId: string, caseRef: string) =>
@@ -153,7 +168,17 @@ export const api = {
     request<User>('PATCH', `/users/${id(userId)}`, patch),
 
   import: (
-    body: { format: string; data: unknown; basePath?: string; title?: string; message?: string; kind?: ProposalKind },
+    body: {
+      format: string;
+      data: unknown;
+      basePath?: string;
+      title?: string;
+      message?: string;
+      kind?: ProposalKind;
+      project?: string;
+      layer?: string;
+      createMissing?: boolean;
+    },
     direct: boolean,
   ) => request<ImportResult>('POST', `/import${direct ? '?direct=true' : ''}`, body),
 };

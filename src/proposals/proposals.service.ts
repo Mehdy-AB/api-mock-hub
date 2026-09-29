@@ -6,13 +6,14 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { clean, nextId, nowIso } from '../common/util';
-import { contentOf, routeKey, routeLabel, sameContent, sanitizeEndpoint } from '../endpoints/route-rules';
+import { contentOf, PathIndex, routeKey, sameContent, sanitizeEndpoint } from '../endpoints/route-rules';
 import {
   AuthUser,
   Change,
   CHANGE_TYPES,
   Db,
   Endpoint,
+  EndpointContent,
   Proposal,
   ProposalKind,
   Settings,
@@ -22,6 +23,20 @@ import { applyChanges, checkApplicable } from './apply';
 import { approvalState, changeRoute, changeWithDiff } from './view';
 
 export const PROPOSAL_COLLECTIONS: CollectionName[] = ['endpoints', 'proposals', 'commits'];
+
+/** Paths of the current project and layer set. Rebuilt per operation, since both can change any time. */
+export const pathsOf = (db: Readonly<Db>): PathIndex => new PathIndex(db.projects, db.layers);
+
+/** A project must exist, and a layer must exist inside that project. */
+export function scopeError(db: Readonly<Db>, c: EndpointContent): string | null {
+  if (c.projectId && !db.projects.some((p) => p.id === c.projectId)) return `project ${c.projectId} not found`;
+  if (c.layerId) {
+    const layer = db.layers.find((l) => l.id === c.layerId);
+    if (!layer) return `layer ${c.layerId} not found`;
+    if (layer.projectId !== c.projectId) return `layer "${layer.name}" belongs to another project`;
+  }
+  return null;
+}
 
 export interface ChangeInput {
   type: string;
@@ -130,7 +145,9 @@ export class ProposalsService {
         return { ...c, baseVersion: cur.version, before: structuredClone(cur) };
       });
       if (!errors.length) {
-        for (const cf of checkApplicable(db.endpoints, rebased)) errors.push(`changes[${cf.changeIndex}]: ${cf.reason}`);
+        for (const cf of checkApplicable(db.endpoints, rebased, pathsOf(db))) {
+          errors.push(`changes[${cf.changeIndex}]: ${cf.reason}`);
+        }
       }
       if (errors.length) {
         throw new ConflictException({ statusCode: 409, message: 'Proposal still conflicts after rebase', errors });
@@ -326,7 +343,8 @@ export class ProposalsService {
   /** Applies a proposal to the live set, or marks it as conflicting. */
   applyIn(db: Db, p: Proposal, approvedBy: string[], opts: { direct?: boolean; revertOf?: number } = {}): void {
     const now = nowIso();
-    const conflicts = checkApplicable(db.endpoints, p.changes);
+    const paths = pathsOf(db);
+    const conflicts = checkApplicable(db.endpoints, p.changes, paths);
     if (conflicts.length) {
       p.status = 'conflict';
       p.conflicts = conflicts;
@@ -359,7 +377,7 @@ export class ProposalsService {
     // Other open proposals may no longer apply; flag them now so authors see it early.
     for (const other of db.proposals) {
       if (other.id === p.id || other.status !== 'open') continue;
-      const c = checkApplicable(db.endpoints, other.changes);
+      const c = checkApplicable(db.endpoints, other.changes, paths);
       if (c.length) {
         other.status = 'conflict';
         other.conflicts = c;
@@ -378,6 +396,7 @@ export class ProposalsService {
     const errors: string[] = [];
     const out: Change[] = [];
     const touched = new Set<string>();
+    const paths = pathsOf(db);
 
     inputs.forEach((c, i) => {
       const at = `changes[${i}]`;
@@ -393,7 +412,7 @@ export class ProposalsService {
           errors.push(`${at}: endpoint ${c.endpointId ?? c.ref ?? '(give endpointId or ref)'} not found`);
           return;
         }
-        const label = routeLabel(target);
+        const label = paths.label(target);
         if (touched.has(target.id)) {
           errors.push(`${at}: ${label} is changed more than once in this proposal`);
           return;
@@ -414,8 +433,13 @@ export class ProposalsService {
           return;
         }
         after = r.value;
+        const bad = scopeError(db, after);
+        if (bad) {
+          errors.push(`${at}.endpoint: ${bad}`);
+          return;
+        }
         if (target && sameContent(contentOf(target), after)) {
-          errors.push(`${at}: no difference from the live version of ${routeLabel(target)}`);
+          errors.push(`${at}: no difference from the live version of ${paths.label(target)}`);
           return;
         }
       }
@@ -431,18 +455,22 @@ export class ProposalsService {
     });
 
     if (!errors.length) {
-      for (const cf of checkApplicable(db.endpoints, out)) errors.push(`changes[${cf.changeIndex}]: ${cf.reason}`);
+      for (const cf of checkApplicable(db.endpoints, out, paths)) errors.push(`changes[${cf.changeIndex}]: ${cf.reason}`);
     }
     if (errors.length) throw new BadRequestException({ statusCode: 400, message: 'Invalid changes', errors });
     return out;
   }
 
+  /** By id, or by "GET /users/:id" written either as the full URL or as the path inside its project. */
   private findTarget(db: Db, c: ChangeInput): Endpoint | undefined {
     if (c.endpointId) return db.endpoints.find((e) => e.id === c.endpointId);
     if (c.ref) {
       const [method, ...rest] = c.ref.trim().split(/\s+/);
       const key = routeKey(method ?? '', rest.join(' '));
-      return db.endpoints.find((e) => routeKey(e.method, e.path) === key);
+      const paths = pathsOf(db);
+      return (
+        db.endpoints.find((e) => paths.key(e) === key) ?? db.endpoints.find((e) => routeKey(e.method, e.path) === key)
+      );
     }
     return undefined;
   }

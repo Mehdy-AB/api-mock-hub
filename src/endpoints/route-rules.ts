@@ -6,8 +6,10 @@ import {
   EndpointContent,
   HTTP_METHODS,
   HttpMethod,
+  Layer,
   MockResponse,
   ParamDoc,
+  Project,
   RequestDoc,
   ResponseCase,
 } from '../storage/models';
@@ -79,6 +81,90 @@ export function compareSpecificity(a: string, b: string): number {
   return 0;
 }
 
+/** '' (no prefix) or a static prefix such as '/homefit'. Never a param or wildcard: those belong to endpoints. */
+export function normalizeBasePath(raw: string | undefined | null): string {
+  const p = (raw ?? '').trim();
+  if (!p || p === '/') return '';
+  return normalizePath(p);
+}
+
+export function basePathError(p: string): string | null {
+  if (!p) return null;
+  if (/[:*]/.test(p)) return 'base path must be static: no ":param" or "*wildcard" segments';
+  return pathError(p);
+}
+
+/** "homefit", "Gym local" -> "gym-local". Keys are how import files and exports refer to a project or layer. */
+export function slugify(raw: string, fallback = 'item'): string {
+  const s = raw
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40);
+  return s || fallback;
+}
+
+export function uniqueKey(raw: string, taken: Set<string>, fallback = 'item'): string {
+  const base = slugify(raw, fallback);
+  let key = base;
+  for (let n = 2; taken.has(key); n++) key = `${base}-${n}`;
+  return key;
+}
+
+export interface Scoped {
+  method?: string;
+  path: string;
+  projectId?: string;
+  layerId?: string;
+}
+
+/**
+ * Resolves endpoint paths against their project and layer prefixes.
+ * Every collision check, route match and document uses the full path it returns.
+ */
+export class PathIndex {
+  private readonly projects = new Map<string, Project>();
+  private readonly layers = new Map<string, Layer>();
+
+  constructor(projects: readonly Project[] = [], layers: readonly Layer[] = []) {
+    for (const p of projects) this.projects.set(p.id, p);
+    for (const l of layers) this.layers.set(l.id, l);
+  }
+
+  project(c: Scoped): Project | undefined {
+    return c.projectId ? this.projects.get(c.projectId) : undefined;
+  }
+
+  layer(c: Scoped): Layer | undefined {
+    return c.layerId ? this.layers.get(c.layerId) : undefined;
+  }
+
+  /** The prefix an endpoint inherits from its project and layer. */
+  prefix(c: Scoped): string {
+    return `${this.project(c)?.basePath ?? ''}${this.layer(c)?.basePath ?? ''}`;
+  }
+
+  /** The URL the mock actually answers on. */
+  full(c: Scoped): string {
+    const joined = `${this.prefix(c)}${c.path}`;
+    return joined ? normalizePath(joined) : '/';
+  }
+
+  key(c: Scoped & { method: string }): string {
+    return routeKey(c.method, this.full(c));
+  }
+
+  /** "GET /homefit/api/gym/members" */
+  label(c: Scoped & { method: string }): string {
+    return `${c.method} ${this.full(c)}`;
+  }
+
+  /** "HomeFit · Gym local", for messages and headings. */
+  scopeName(c: Scoped): string {
+    return [this.project(c)?.name, this.layer(c)?.name].filter(Boolean).join(' · ');
+  }
+}
+
 export const MAX_RESPONSE_CASES = 20;
 const CASE_ID_RE = /^[a-z0-9][a-z0-9_-]*$/;
 
@@ -130,6 +216,8 @@ export function activeCase(e: Endpoint): ResponseCase {
 
 export function contentOf(e: EndpointContent | Endpoint): EndpointContent {
   const c: EndpointContent = { method: e.method, path: e.path, tags: e.tags, responses: e.responses };
+  if (e.projectId !== undefined) c.projectId = e.projectId;
+  if (e.layerId !== undefined) c.layerId = e.layerId;
   if (e.summary !== undefined) c.summary = e.summary;
   if (e.description !== undefined) c.description = e.description;
   if (e.request !== undefined) c.request = e.request;
@@ -187,6 +275,13 @@ export function sanitizeEndpoint(input: unknown, at = 'endpoint'): { value?: End
   if (errors.length || !responses) return { errors };
 
   const value: EndpointContent = { method: method as HttpMethod, path, tags, responses };
+  const projectId = optString('projectId');
+  const layerId = optString('layerId');
+  if (projectId) value.projectId = projectId;
+  if (layerId) {
+    if (!projectId) err('layerId needs projectId: a layer always belongs to a project');
+    else value.layerId = layerId;
+  }
   if (summary) value.summary = summary;
   if (description) value.description = description;
   if (request) value.request = request;

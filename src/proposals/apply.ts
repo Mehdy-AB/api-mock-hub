@@ -1,12 +1,13 @@
 import { randomUUID } from 'crypto';
-import { contentOf, routeKey, routeLabel } from '../endpoints/route-rules';
+import { contentOf, PathIndex } from '../endpoints/route-rules';
 import { Change, ConflictInfo, Endpoint } from '../storage/models';
 
 /**
  * Checks whether `changes` can be applied to the `live` endpoint set right now.
  * Detects stale versions, vanished endpoints and route collisions in the resulting set.
+ * Collisions are judged on the full URL, so the same path in two projects is fine.
  */
-export function checkApplicable(live: Endpoint[], changes: Change[]): ConflictInfo[] {
+export function checkApplicable(live: Endpoint[], changes: Change[], paths = new PathIndex()): ConflictInfo[] {
   const conflicts: ConflictInfo[] = [];
   const byId = new Map(live.map((e) => [e.id, e]));
   const replaced = new Set<string>();
@@ -19,7 +20,7 @@ export function checkApplicable(live: Endpoint[], changes: Change[]): ConflictIn
       }
       return;
     }
-    const label = c.before ? routeLabel(c.before) : c.endpointId;
+    const label = c.before ? paths.label(c.before) : c.endpointId;
     const cur = c.endpointId ? byId.get(c.endpointId) : undefined;
     if (!cur) {
       conflicts.push({ changeIndex: i, reason: `${label} no longer exists` });
@@ -34,14 +35,14 @@ export function checkApplicable(live: Endpoint[], changes: Change[]): ConflictIn
 
   const taken = new Map<string, string>();
   for (const e of live) {
-    if (!replaced.has(e.id)) taken.set(routeKey(e.method, e.path), `existing endpoint ${routeLabel(e)}`);
+    if (!replaced.has(e.id)) taken.set(paths.key(e), `existing endpoint ${paths.label(e)}`);
   }
   changes.forEach((c, i) => {
     if (!c.after) return;
-    const key = routeKey(c.after.method, c.after.path);
+    const key = paths.key(c.after);
     const clash = taken.get(key);
     if (clash) {
-      conflicts.push({ changeIndex: i, reason: `${routeLabel(c.after)} collides with ${clash}` });
+      conflicts.push({ changeIndex: i, reason: `${paths.label(c.after)} collides with ${clash}` });
     } else {
       taken.set(key, `change #${i + 1} of this proposal`);
     }

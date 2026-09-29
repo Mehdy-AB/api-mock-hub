@@ -3,7 +3,7 @@ import { api } from '../api';
 import { useUser } from '../auth';
 import { StatusBadge } from '../components/Badges';
 import { ErrorBox, Field } from '../components/Common';
-import { hubStore } from '../data';
+import { hubStore, useHubData } from '../data';
 import { navigate } from '../router';
 import type { ImportResult, ProposalKind } from '../types';
 import { isObject, parseJsonText, plural } from '../util';
@@ -45,6 +45,7 @@ function detect(value: unknown): Detected | null {
 /** The import form, shown in a popup over the API page. */
 export function ImportForm({ onClose }: { onClose: () => void }) {
   const user = useUser();
+  const hub = useHubData();
   const [text, setText] = useState('');
   const [format, setFormat] = useState<Format>('auto');
   const [overrideBase, setOverrideBase] = useState(false);
@@ -52,6 +53,7 @@ export function ImportForm({ onClose }: { onClose: () => void }) {
   const [title, setTitle] = useState('');
   const [message, setMessage] = useState('');
   const [kind, setKind] = useState<'' | ProposalKind>('');
+  const [scope, setScope] = useState('');
   const [direct, setDirect] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
@@ -82,6 +84,8 @@ export function ImportForm({ onClose }: { onClose: () => void }) {
           title: title.trim() || detected.wrapper?.title,
           message: message.trim() || detected.wrapper?.message,
           kind: kind || undefined,
+          project: scope ? scope.split('|')[0] : undefined,
+          layer: scope.split('|')[1] || undefined,
         },
         direct,
       );
@@ -113,6 +117,7 @@ export function ImportForm({ onClose }: { onClose: () => void }) {
             {plural(result.summary.added.length, 'added endpoint')}, {plural(result.summary.updated.length, 'updated endpoint')},{' '}
             {result.summary.unchanged.length} unchanged.
           </div>
+          {result.created?.length ? <div className="small">Created: {result.created.join(', ')}.</div> : null}
           {result.warnings.length > 0 && (
             <ul className="small">
               {result.warnings.map((w, i) => (
@@ -197,6 +202,25 @@ export function ImportForm({ onClose }: { onClose: () => void }) {
             <option value="request">Request</option>
           </select>
         </Field>
+        {hub.projects.length > 0 && (
+          <Field label="Into" hint="Project and layer these endpoints land in">
+            <select value={scope} onChange={(e) => setScope(e.target.value)}>
+              <option value="">No project</option>
+              {hub.projects.flatMap((p) => [
+                <option key={p.id} value={`${p.id}|`}>
+                  {p.name}
+                  {p.basePath ? ` (${p.basePath})` : ''}
+                </option>,
+                ...p.layers.map((l) => (
+                  <option key={l.id} value={`${p.id}|${l.id}`}>
+                    {`${p.name} · ${l.name}`}
+                    {`${p.basePath}${l.basePath}` ? ` (${p.basePath}${l.basePath})` : ''}
+                  </option>
+                )),
+              ])}
+            </select>
+          </Field>
+        )}
       </div>
       {effectiveFormat === 'openapi' && (
         <div className="stack" style={{ gap: 6 }}>

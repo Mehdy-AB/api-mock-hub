@@ -7,11 +7,22 @@
  */
 import { existsSync, readFileSync } from 'fs';
 import { isPlainObject } from '../common/json-utils';
-import { routeKey, routeLabel, sanitizeEndpoint } from '../endpoints/route-rules';
-import { detectFormat, extractHubItems } from '../import/hub-format';
+import { normalizeBasePath, normalizePath, routeKey, sanitizeEndpoint } from '../endpoints/route-rules';
+import { detectFormat, extractHubItems, extractHubProjects } from '../import/hub-format';
 import { parseOpenApi } from '../import/openapi-parser';
 
-const WRAPPER_KEYS = ['format', 'data', 'basePath', 'title', 'message', 'kind'];
+const WRAPPER_KEYS = ['format', 'data', 'basePath', 'title', 'message', 'kind', 'project', 'layer', 'createMissing'];
+
+/** Prefixes declared by the file, so collisions are judged on the URL the hub would serve. */
+function prefixes(data: unknown): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const p of extractHubProjects(data)) {
+    const base = normalizeBasePath(p.basePath);
+    out.set(`${p.key}|`, base);
+    for (const l of p.layers ?? []) out.set(`${p.key}|${l.key}`, `${base}${normalizeBasePath(l.basePath)}`);
+  }
+  return out;
+}
 
 export interface ValidationResult {
   format: string;
@@ -19,6 +30,8 @@ export interface ValidationResult {
   errors: string[];
   warnings: string[];
 }
+
+const str = (v: unknown): string | undefined => (typeof v === 'string' && v.trim() ? v.trim() : undefined);
 
 export function validateImport(raw: unknown): ValidationResult {
   const errors: string[] = [];
@@ -65,6 +78,8 @@ export function validateImport(raw: unknown): ValidationResult {
   }
   if (!items.length) errors.push('no endpoints found');
 
+  const declared = resolved === 'hub' ? prefixes(data) : new Map<string, string>();
+  const wrapper = isPlainObject(raw) ? raw : {};
   const seen = new Map<string, string>();
   items.forEach((item, i) => {
     const r = sanitizeEndpoint(item, `endpoints[${i}]`);
@@ -72,17 +87,25 @@ export function validateImport(raw: unknown): ValidationResult {
       errors.push(...r.errors);
       return;
     }
-    const key = routeKey(r.value.method, r.value.path);
-    const label = routeLabel(r.value);
+    const raw2 = (item ?? {}) as Record<string, unknown>;
+    const projectKey = str(raw2.project) ?? str(wrapper.project);
+    const layerKey = str(raw2.layer) ?? (str(raw2.project) ? undefined : str(wrapper.layer));
+    const prefix = projectKey ? (declared.get(`${projectKey}|${layerKey ?? ''}`) ?? '') : '';
+    const full = prefix ? normalizePath(`${prefix}${r.value.path}`) : r.value.path;
+    const key = routeKey(r.value.method, full);
+    const label = `${r.value.method} ${full}`;
     const clash = seen.get(key);
     if (clash) {
       errors.push(`endpoints[${i}]: ${label} collides with ${clash} (same method and path shape)`);
       return;
     }
     seen.set(key, label);
+    const scope = [projectKey, layerKey].filter(Boolean).join('/');
     const [first, ...rest] = r.value.responses;
     const extra = rest.length ? `  +${rest.length} case(s): ${rest.map((c) => `${c.id} ${c.status}`).join(', ')}` : '';
-    routes.push(`${label} -> ${first.status}${first.delayMs ? ` after ${first.delayMs} ms` : ''}${extra}`);
+    routes.push(
+      `${scope ? `[${scope}] ` : ''}${label} -> ${first.status}${first.delayMs ? ` after ${first.delayMs} ms` : ''}${extra}`,
+    );
   });
   return { format: resolved, routes, errors, warnings };
 }

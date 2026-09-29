@@ -1,11 +1,12 @@
-import { Controller, Get, Header, Inject, Res } from '@nestjs/common';
-import { ApiExcludeEndpoint, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { Controller, Get, Header, Inject, NotFoundException, Query, Res } from '@nestjs/common';
+import { ApiExcludeEndpoint, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { existsSync } from 'fs';
 import * as path from 'path';
 import { Public } from '../auth/decorators';
 import { APP_CONFIG, AppConfig } from '../config/app-config';
 import { API_BASE, MGMT_DOCS_PATH, MOCK_DOCS_PATH, MOCK_OPENAPI_PATH } from '../constants';
+import { PathIndex } from '../endpoints/route-rules';
 import { StoreService } from '../storage/store.service';
 import { generateOpenApi } from './openapi-generator';
 
@@ -21,8 +22,18 @@ export class HubController {
   @Get(MOCK_OPENAPI_PATH.slice(1))
   @Header('Cache-Control', 'no-store')
   @ApiOperation({ summary: 'OpenAPI 3 document of the live mock endpoints' })
-  openapi() {
-    return generateOpenApi(this.store.db.endpoints, { commitId: this.store.lastCommitId });
+  @ApiQuery({ name: 'project', required: false, description: 'Project key or id: only that project’s endpoints' })
+  openapi(@Query('project') projectRef?: string) {
+    const db = this.store.db;
+    const index = new PathIndex(db.projects, db.layers);
+    const ref = projectRef?.trim();
+    if (!ref) return generateOpenApi(db.endpoints, { commitId: this.store.lastCommitId, index });
+    const project = db.projects.find((p) => p.key === ref || p.id === ref);
+    if (!project) throw new NotFoundException(`No project "${ref}"`);
+    return generateOpenApi(
+      db.endpoints.filter((e) => e.projectId === project.id),
+      { commitId: this.store.lastCommitId, index, project },
+    );
   }
 
   @Get(`${API_BASE}/health`)
@@ -32,6 +43,7 @@ export class HubController {
     return {
       status: 'ok',
       endpoints: db.endpoints.length,
+      projects: db.projects.length,
       openProposals: db.proposals.filter((p) => p.status === 'open').length,
       lastCommit: this.store.lastCommitId,
     };

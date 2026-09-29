@@ -34,6 +34,9 @@ export interface CaseForm {
 export interface FormState {
   method: HttpMethod;
   path: string;
+  /** '' when the endpoint belongs to no project. A layer always needs a project. */
+  projectId: string;
+  layerId: string;
   summary: string;
   description: string;
   tags: string;
@@ -85,10 +88,16 @@ export function defaultCaseName(status: number): string {
   return STATUS_NAMES[status] ?? (status < 400 ? `Status ${status}` : `Error ${status}`);
 }
 
-export const blankEndpoint = (method: HttpMethod = 'GET', path = '/'): EndpointContent => ({
+export const blankEndpoint = (
+  method: HttpMethod = 'GET',
+  path = '/',
+  scope: { projectId?: string; layerId?: string } = {},
+): EndpointContent => ({
   method,
   path,
   tags: [],
+  ...(scope.projectId ? { projectId: scope.projectId } : {}),
+  ...(scope.projectId && scope.layerId ? { layerId: scope.layerId } : {}),
   responses: [{ id: 'success', name: 'Success', status: 200, body: {} }],
 });
 
@@ -129,6 +138,8 @@ export function toForm(c: EndpointContent, openCaseId?: string): FormState {
   return {
     method: c.method,
     path: c.path,
+    projectId: c.projectId ?? '',
+    layerId: c.layerId ?? '',
     summary: c.summary ?? '',
     description: c.description ?? '',
     tags: c.tags.join(', '),
@@ -255,6 +266,10 @@ export function fromForm(f: FormState): { value?: EndpointContent; errors: Error
     tags: [...new Set(f.tags.split(',').map((t) => t.trim()).filter(Boolean))],
     responses,
   };
+  if (f.projectId) {
+    value.projectId = f.projectId;
+    if (f.layerId) value.layerId = f.layerId;
+  }
   if (f.summary.trim()) value.summary = f.summary.trim();
   if (f.description.trim()) value.description = f.description.trim();
   if (Object.keys(request).length) value.request = request;

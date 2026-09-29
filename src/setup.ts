@@ -45,9 +45,22 @@ export function configureApp(app: NestExpressApplication): void {
     swaggerOptions: { persistAuthorization: true },
   });
 
-  const mockUi: swaggerUi.SwaggerUiOptions = {
+  // customJsStr is supported by swagger-ui-express 5 but missing from its typings.
+  const mockUi: swaggerUi.SwaggerUiOptions & { customJsStr?: string } = {
     customSiteTitle: 'Mock Hub: mock endpoints',
     swaggerOptions: { url: MOCK_OPENAPI_PATH, displayRequestDuration: true, tryItOutEnabled: true },
+    // "/_hub/docs/?project=homefit" shows one project. The page is built once, so the spec is swapped in the browser.
+    customJsStr: `(function () {
+      var project = new URLSearchParams(location.search).get('project');
+      if (!project) return;
+      var url = '${MOCK_OPENAPI_PATH}?project=' + encodeURIComponent(project);
+      var timer = setInterval(function () {
+        if (!window.ui || !window.ui.specActions) return;
+        clearInterval(timer);
+        window.ui.specActions.updateUrl(url);
+        window.ui.specActions.download(url);
+      }, 30);
+    })();`,
   };
   // swagger-ui-express uses relative asset URLs, so the page must be served with a trailing slash.
   const trailingSlash = (req: Request, res: Response, next: NextFunction) => {

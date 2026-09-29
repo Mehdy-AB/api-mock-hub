@@ -38,9 +38,40 @@ export interface ActiveCase {
   at: string;
 }
 
+/** A product whose mocks live together. Its basePath prefixes every endpoint inside it. */
+export interface Project {
+  id: string;
+  key: string;
+  name: string;
+  description?: string;
+  basePath: string;
+  order: number;
+  createdAt: string;
+  updatedAt: string;
+  endpoints?: number;
+  layers: Layer[];
+}
+
+/** A tier inside a project: cloud API, local server, core… */
+export interface Layer {
+  id: string;
+  projectId: string;
+  key: string;
+  name: string;
+  description?: string;
+  basePath: string;
+  order: number;
+  createdAt: string;
+  updatedAt: string;
+  endpoints?: number;
+}
+
 export interface EndpointContent {
   method: HttpMethod;
+  /** Relative to the project and layer prefixes. */
   path: string;
+  projectId?: string;
+  layerId?: string;
   summary?: string;
   description?: string;
   tags: string[];
@@ -51,6 +82,8 @@ export interface EndpointContent {
 
 export interface Endpoint extends EndpointContent {
   id: string;
+  /** Full URL the mock answers on, prefixes included. Sent by the server. */
+  url?: string;
   owner: string;
   version: number;
   createdAt: string;
@@ -205,6 +238,16 @@ export interface ImportResult {
   format: string;
   summary: { added: string[]; updated: string[]; unchanged: string[] };
   warnings: string[];
+  /** Projects and layers the import had to create. */
+  created?: string[];
+}
+
+export interface ProjectInput {
+  name?: string;
+  key?: string;
+  description?: string;
+  basePath?: string;
+  order?: number;
 }
 
 export interface ChangePayload {

@@ -1,8 +1,8 @@
 import { isPlainObject } from '../common/json-utils';
 import { clean } from '../common/util';
 import { MOCK_CASE_HEADER, MOCK_CASE_QUERY } from '../constants';
-import { activeCase, pathParamNames, routeLabel, toOpenApiPath } from '../endpoints/route-rules';
-import { Endpoint, ParamDoc, ResponseCase } from '../storage/models';
+import { activeCase, PathIndex, pathParamNames, toOpenApiPath } from '../endpoints/route-rules';
+import { Endpoint, ParamDoc, Project, ResponseCase } from '../storage/models';
 
 type Json = Record<string, unknown>;
 
@@ -73,16 +73,22 @@ function responsesByStatus(cases: ResponseCase[], live: ResponseCase): Json {
   return out;
 }
 
-/** OpenAPI 3 document describing the live mock endpoints. */
-export function generateOpenApi(endpoints: Endpoint[], meta: { commitId: number }): Json {
+/** OpenAPI 3 document describing the live mock endpoints, at the URLs they answer on. */
+export function generateOpenApi(
+  endpoints: Endpoint[],
+  meta: { commitId: number; index?: PathIndex; project?: Project },
+): Json {
+  const index = meta.index ?? new PathIndex();
   const paths: Record<string, Json> = {};
   const tags = new Set<string>();
-  const sorted = [...endpoints].sort((a, b) => a.path.localeCompare(b.path) || a.method.localeCompare(b.method));
+  const sorted = [...endpoints]
+    .map((e) => ({ e, full: index.full(e) }))
+    .sort((a, b) => a.full.localeCompare(b.full) || a.e.method.localeCompare(b.e.method));
 
-  for (const e of sorted) {
+  for (const { e, full } of sorted) {
     const req = e.request ?? {};
     const parameters = [
-      ...pathParamNames(e.path).map((n) => parameter(req.params?.find((p) => p.name === n), n, 'path', true)),
+      ...pathParamNames(full).map((n) => parameter(req.params?.find((p) => p.name === n), n, 'path', true)),
       ...(req.query ?? []).map((q) => parameter(q, q.name, 'query', !!q.required)),
       ...(req.headers ?? []).map((h) => parameter(h, h.name, 'header', !!h.required)),
     ];
@@ -90,7 +96,9 @@ export function generateOpenApi(endpoints: Endpoint[], meta: { commitId: number 
     opTags.forEach((t) => tags.add(t));
 
     const live = activeCase(e);
+    const scope = index.scopeName(e);
     const meta_ = [`Mock v${e.version} by \`${e.owner}\`, updated ${e.updatedAt}`];
+    if (scope) meta_.unshift(`**${scope}**`);
     if (live.delayMs) meta_.push(`simulated delay ${live.delayMs} ms`);
     if (e.responses.length > 1) {
       meta_.push(
@@ -102,7 +110,7 @@ export function generateOpenApi(endpoints: Endpoint[], meta: { commitId: number 
 
     const operation = clean({
       tags: opTags,
-      summary: e.summary ?? routeLabel(e),
+      summary: e.summary ?? `${e.method} ${full}`,
       description: [e.description, meta_.join(', ')].filter(Boolean).join('\n\n'),
       operationId: `${e.method.toLowerCase()}_${e.id.replace(/-/g, '').slice(0, 12)}`,
       parameters: parameters.length ? parameters : undefined,
@@ -116,21 +124,27 @@ export function generateOpenApi(endpoints: Endpoint[], meta: { commitId: number 
         version: e.version,
         owner: e.owner,
         updatedAt: e.updatedAt,
+        project: index.project(e)?.key,
+        layer: index.layer(e)?.key,
         activeCase: live.id,
         cases: e.responses.map((c) => ({ id: c.id, name: c.name, status: c.status })),
       },
     });
-    const key = toOpenApiPath(e.path);
+    const key = toOpenApiPath(full);
     (paths[key] ??= {})[e.method.toLowerCase()] = operation;
   }
 
   return {
     openapi: '3.0.3',
     info: {
-      title: 'API Mock Hub: mock endpoints',
+      title: meta.project ? `API Mock Hub: ${meta.project.name}` : 'API Mock Hub: mock endpoints',
       version: `commit-${meta.commitId}`,
-      description:
+      description: [
         'Live mock endpoints. Every call on this page hits the mock server and returns the approved static response.',
+        meta.project?.description,
+      ]
+        .filter(Boolean)
+        .join('\n\n'),
     },
     servers: [{ url: '/', description: 'This mock server' }],
     tags: [...tags].sort().map((name) => ({ name })),

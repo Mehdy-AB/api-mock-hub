@@ -4,15 +4,16 @@ import { useUser } from '../auth';
 import { BackendBadge } from '../components/ActivityPanel';
 import { Empty, ErrorBox, Loading } from '../components/Common';
 import { importDialog } from '../components/ImportDialog';
+import { projectsDialog } from '../components/ProjectsDialog';
 import { blankEndpoint, Errors, FormState, fromForm, normalizePath, toForm } from '../components/form-model';
 import { LazyProposalCard, ProposalCard } from '../components/ProposalCard';
 import { TryPanel } from '../components/TryPanel';
-import { hubStore, isOpen, useHubData } from '../data';
+import { fullPath as cachedPath, hubStore, isOpen, useHubData } from '../data';
 import { useAsync } from '../hooks';
 import { href } from '../router';
 import { useToast } from '../toast';
-import { ChangePayload, CommitSummary, Endpoint, EndpointContent, HttpMethod, METHODS, Proposal, ResponseCase } from '../types';
-import { contentOf, errorText, exampleText, plural, routeKey, sameJson, timeAgo, uid } from '../util';
+import { ChangePayload, CommitSummary, Endpoint, EndpointContent, HttpMethod, METHODS, Project, Proposal, ResponseCase } from '../types';
+import { contentOf, errorText, exampleText, fullPath, plural, routeKey, sameJson, timeAgo, uid } from '../util';
 import { canApprove, needsMyReview } from './Proposals';
 
 // The fields pull in the code editor, so they load when the first row opens.
@@ -51,9 +52,10 @@ const emptyPersisted = (owner: string): Persisted => ({
 // Survives navigating to other screens (not a reload), so unsaved edits aren't lost.
 let persisted: Persisted = emptyPersisted('');
 
-type BulkAction = 'activeCase' | 'delay' | 'status' | 'addTag' | 'removeTag' | 'delete';
+type BulkAction = 'activeCase' | 'move' | 'delay' | 'status' | 'addTag' | 'removeTag' | 'delete';
 const BULK: { id: BulkAction; label: string; placeholder?: string; numeric?: boolean }[] = [
   { id: 'activeCase', label: 'Return case now' },
+  { id: 'move', label: 'Move to project / layer' },
   { id: 'delay', label: 'Set delay, all cases (ms)', placeholder: '0 to 60000', numeric: true },
   { id: 'status', label: 'Set status of the live case', placeholder: '100 to 599', numeric: true },
   { id: 'addTag', label: 'Add tag', placeholder: 'tag' },
@@ -99,7 +101,7 @@ const shownCase = (c: EndpointContent, e: Endpoint | null): ResponseCase => {
 
 const routeOfEdit = (ed: Edit) => {
   const c = preview(ed, null);
-  return `${c.method} ${c.path}`;
+  return `${c.method} ${cachedPath(c)}`;
 };
 
 function autoTitle(list: Edit[]): string {
@@ -109,6 +111,35 @@ function autoTitle(list: Edit[]): string {
     return `${verb} ${routeOfEdit(ed)}`;
   }
   return `Update ${list.length} endpoints`;
+}
+
+/** "" for endpoints outside any project, else "<projectId>|<layerId>". */
+const scopeKey = (c: { projectId?: string; layerId?: string }) => `${c.projectId ?? ''}|${c.layerId ?? ''}`;
+
+interface ScopeChoice {
+  key: string;
+  label: string;
+  projectId?: string;
+  layerId?: string;
+  basePath: string;
+}
+
+/** Every project and layer an endpoint can be moved into, plus "no project". */
+function scopeChoices(projects: Project[]): ScopeChoice[] {
+  const out: ScopeChoice[] = [{ key: '|', label: 'No project', basePath: '' }];
+  for (const p of projects) {
+    out.push({ key: scopeKey({ projectId: p.id }), label: p.name, projectId: p.id, basePath: p.basePath });
+    for (const l of p.layers) {
+      out.push({
+        key: scopeKey({ projectId: p.id, layerId: l.id }),
+        label: `${p.name} · ${l.name}`,
+        projectId: p.id,
+        layerId: l.id,
+        basePath: `${p.basePath}${l.basePath}`,
+      });
+    }
+  }
+  return out;
 }
 
 const queryText = (c: EndpointContent) =>
@@ -143,6 +174,7 @@ export function ApiPage({
   const [editingProposal, setEditingProposal] = useState<number | null>(persisted.editingProposal);
   const [q, setQ] = useState('');
   const [method, setMethod] = useState('');
+  const [scope, setScope] = useState('');
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkAction, setBulkAction] = useState<BulkAction>('delay');
   const [bulkValue, setBulkValue] = useState('');
@@ -217,7 +249,7 @@ export function ApiPage({
     return () => window.removeEventListener('beforeunload', warn);
   }, [hasDirty]);
 
-  const addNew = (content: EndpointContent = blankEndpoint()) => {
+  const addNew = (content: EndpointContent = blankEndpoint('GET', '/', currentScope())) => {
     const key = `new-${uid()}`;
     setEdits((p) => ({ ...p, [key]: { key, base: null, form: toForm(content), errors: {}, serverErrors: [] } }));
     setNewKeys((k) => [key, ...k]);
@@ -233,6 +265,12 @@ export function ApiPage({
     addNew(blankEndpoint(m, newDefaults.path || '/'));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  /** The project and layer a new row starts in: whatever the page is filtered to. */
+  function currentScope(): { projectId?: string; layerId?: string } {
+    const [projectId, layerId] = scope.split('|');
+    return { projectId: projectId || undefined, layerId: layerId || undefined };
+  }
 
   const toggleOpen = (key: string) =>
     setOpen((s) => {
@@ -477,19 +515,35 @@ export function ApiPage({
   };
 
   const needle = q.trim().toLowerCase();
+  const choices = scopeChoices(hub.projects);
+  const url = (c: { path: string; projectId?: string; layerId?: string }) => fullPath(c, hub.projects);
   const rows = hub.endpoints
     .filter(
       (e) =>
         (!method || e.method === method) &&
+        (!scope || scopeKey(e) === scope || (scope.endsWith('|') && e.projectId === scope.slice(0, -1))) &&
         (!needle ||
-          e.path.toLowerCase().includes(needle) ||
+          url(e).toLowerCase().includes(needle) ||
           (e.summary ?? '').toLowerCase().includes(needle) ||
           e.tags.some((t) => t.toLowerCase().includes(needle))),
     )
-    .sort((a, b) => a.path.localeCompare(b.path) || a.method.localeCompare(b.method));
-  const groups = new Map<string, Endpoint[]>();
-  for (const e of rows) groups.set(e.tags[0] ?? 'other', [...(groups.get(e.tags[0] ?? 'other') ?? []), e]);
-  const ordered = [...groups].sort(([a], [b]) => (a === 'other' ? 1 : b === 'other' ? -1 : a.localeCompare(b)));
+    .sort((a, b) => url(a).localeCompare(url(b)) || a.method.localeCompare(b.method));
+
+  // Sections: one per project and layer, then the tag groups inside them.
+  const sections = new Map<string, { choice: ScopeChoice; groups: Map<string, Endpoint[]> }>();
+  for (const e of rows) {
+    const key = scopeKey(e);
+    const choice = choices.find((c) => c.key === key) ?? { key, label: 'No project', basePath: '' };
+    const section = sections.get(key) ?? { choice, groups: new Map<string, Endpoint[]>() };
+    const tag = e.tags[0] ?? 'other';
+    section.groups.set(tag, [...(section.groups.get(tag) ?? []), e]);
+    sections.set(key, section);
+  }
+  // Projects first, in their own order; endpoints outside any project come last.
+  const rank = (key: string) => (key === '|' ? Number.MAX_SAFE_INTEGER : choices.findIndex((c) => c.key === key));
+  const orderedSections = [...sections.values()].sort((a, b) => rank(a.choice.key) - rank(b.choice.key));
+  const tagGroups = (groups: Map<string, Endpoint[]>) =>
+    [...groups].sort(([a], [b]) => (a === 'other' ? 1 : b === 'other' ? -1 : a.localeCompare(b)));
   const visibleIds = rows.map((e) => e.id);
   const allSelected = visibleIds.length > 0 && visibleIds.every((id) => selected.has(id));
   const currentBulk = BULK.find((b) => b.id === bulkAction)!;
@@ -517,6 +571,8 @@ export function ApiPage({
     }
     if (bulkAction === 'delay' && (!Number.isInteger(n) || n < 0 || n > 60000)) return toast('Delay must be 0 to 60000 ms', 'error');
     if (bulkAction === 'status' && (!Number.isInteger(n) || n < 100 || n > 599)) return toast('Status must be 100 to 599', 'error');
+    const target = bulkAction === 'move' ? choices.find((c) => c.key === v) : undefined;
+    if (bulkAction === 'move' && !target) return toast('Pick where to move them', 'error');
     setEdits((p) => {
       const next = { ...p };
       for (const id of selected) {
@@ -529,7 +585,12 @@ export function ApiPage({
         }
         const c = structuredClone(fromForm(ed.form).value ?? contentOf(live));
         const liveIdx = Math.max(0, c.responses.findIndex((r) => r.id === live.active?.caseId));
-        if (bulkAction === 'delay') {
+        if (bulkAction === 'move') {
+          delete c.projectId;
+          delete c.layerId;
+          if (target!.projectId) c.projectId = target!.projectId;
+          if (target!.layerId) c.layerId = target!.layerId;
+        } else if (bulkAction === 'delay') {
           c.responses = c.responses.map((r) => {
             const { delayMs: _drop, ...rest } = r;
             return n > 0 ? { ...rest, delayMs: n } : rest;
@@ -591,7 +652,7 @@ export function ApiPage({
           <button type="button" className="op-toggle" aria-expanded={isOpenRow} onClick={() => toggleOpen(key)}>
             <span className={`method method-${c.method}`}>{c.method}</span>
             <span className="op-path mono">
-              {c.path}
+              {url(c)}
               {qs && (
                 <>
                   <span className="tok-q">?</span>
@@ -675,6 +736,7 @@ export function ApiPage({
                       idPrefix={key}
                       activeCaseId={e ? shownCase(contentOf(e), e).id : undefined}
                       onActivate={e ? (caseId) => switchCase(e, caseId) : undefined}
+                      projects={hub.projects}
                     />
                   </Suspense>
                   {collision && (
@@ -742,6 +804,9 @@ export function ApiPage({
           </p>
         </div>
         <div className="row">
+          <button type="button" className="btn" onClick={projectsDialog.open}>
+            Projects
+          </button>
           <button type="button" className="btn" onClick={importDialog.open}>
             Import
           </button>
@@ -769,6 +834,17 @@ export function ApiPage({
               <option key={m}>{m}</option>
             ))}
           </select>
+          {hub.projects.length > 0 && (
+            <select aria-label="Project" value={scope} onChange={(e) => setScope(e.target.value)}>
+              <option value="">All projects</option>
+              {choices.map((c) => (
+                <option key={c.key} value={c.key}>
+                  {c.label}
+                  {c.basePath ? ` (${c.basePath})` : ''}
+                </option>
+              ))}
+            </select>
+          )}
           <button type="button" className="btn btn-sm btn-ghost" onClick={() => setOpen(new Set([...open, ...visibleIds]))}>
             Expand all
           </button>
@@ -788,7 +864,17 @@ export function ApiPage({
               </option>
             ))}
           </select>
-          {bulkAction === 'activeCase' ? (
+          {bulkAction === 'move' ? (
+            <select aria-label="Move to" value={bulkValue} onChange={(e) => setBulkValue(e.target.value)}>
+              <option value="">Move to…</option>
+              {choices.map((c) => (
+                <option key={c.key} value={c.key}>
+                  {c.label}
+                  {c.basePath ? ` (${c.basePath})` : ''}
+                </option>
+              ))}
+            </select>
+          ) : bulkAction === 'activeCase' ? (
             <select aria-label="Case to return" value={bulkValue} onChange={(e) => setBulkValue(e.target.value)}>
               <option value="">Pick a case…</option>
               {caseChoices.map((name) => (
@@ -862,14 +948,40 @@ export function ApiPage({
       ) : rows.length === 0 && hub.endpoints.length > 0 ? (
         <Empty title="No endpoint matches" />
       ) : (
-        ordered.map(([tag, list]) => (
-          <section key={tag} className="op-group">
-            <h2 className="op-group-title">
-              {tag} <span className="muted">{list.length}</span>
-            </h2>
-            {list.map((e) => renderOp(e.id, e))}
-          </section>
-        ))
+        orderedSections.map((section) => {
+          const count = [...section.groups.values()].reduce((n, l) => n + l.length, 0);
+          const inProject = section.choice.projectId;
+          return (
+            <section key={section.choice.key} className="op-section">
+              {hub.projects.length > 0 && (
+                <div className="op-section-head">
+                  <h2>{section.choice.label}</h2>
+                  {section.choice.basePath && <code className="mono badge">{section.choice.basePath}</code>}
+                  <span className="muted small">{plural(count, 'endpoint')}</span>
+                  <span className="spacer" />
+                  {inProject && (
+                    <a
+                      className="small"
+                      href={`/_hub/docs/?project=${encodeURIComponent(hub.projects.find((p) => p.id === inProject)?.key ?? '')}`}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Swagger
+                    </a>
+                  )}
+                </div>
+              )}
+              {tagGroups(section.groups).map(([tag, list]) => (
+                <div key={tag} className="op-group">
+                  <h3 className="op-group-title">
+                    {tag} <span className="muted">{list.length}</span>
+                  </h3>
+                  {list.map((e) => renderOp(e.id, e))}
+                </div>
+              ))}
+            </section>
+          );
+        })
       )}
 
       {closedProposals.length > 0 && (
